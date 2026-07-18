@@ -37,8 +37,8 @@ async def get_metrics(username: str = Depends(verify_admin)):
     - Tổng số nhân viên đã đăng ký trong cơ sở dữ liệu khuôn mặt.
     - Thời điểm truy vấn.
     """
-    # System metrics
-    cpu_percent = psutil.cpu_percent(interval=0.5)
+    # System metrics (non-blocking: interval=None trả về giá trị cached ngay lập tức)
+    cpu_percent = psutil.cpu_percent(interval=None)
     memory = psutil.virtual_memory()
 
     # Database metrics
