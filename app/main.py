@@ -54,11 +54,6 @@ static_dir = os.path.join(os.path.dirname(__file__), "static", "admin")
 if os.path.isdir(static_dir):
     app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def read_root():
-    return {
-        "message": f"Welcome to {settings.APP_NAME}",
-        "docs": "/api-docs",
-        "admin": "/admin",
-        "health": f"{settings.API_PREFIX}/health"
-    }
+    return RedirectResponse(url="/admin")
