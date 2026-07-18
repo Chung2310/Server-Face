@@ -45,6 +45,7 @@ htmlcov/
 # Local configuration files
 .env
 .env.*
+!.env.example
 
 # InsightFace downloaded models (host path mapped, just in case)
 .insightface/
