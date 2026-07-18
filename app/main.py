@@ -3,8 +3,10 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from app.config import settings
-from app.routers import face, health
+from app.routers import face, health, admin
 from app.services.face_analysis import FaceAnalysisService
 
 logging.basicConfig(level=logging.INFO)
@@ -45,11 +47,18 @@ app.add_middleware(
 # Include Routers with v1 prefixing
 app.include_router(health.router, prefix=settings.API_PREFIX)
 app.include_router(face.router, prefix=settings.API_PREFIX)
+app.include_router(admin.router, prefix=settings.API_PREFIX)
+
+# Mount Admin Panel static files
+static_dir = os.path.join(os.path.dirname(__file__), "static", "admin")
+if os.path.isdir(static_dir):
+    app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
 @app.get("/")
 def read_root():
     return {
         "message": f"Welcome to {settings.APP_NAME}",
         "docs": "/api-docs",
+        "admin": "/admin",
         "health": f"{settings.API_PREFIX}/health"
     }

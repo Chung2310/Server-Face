@@ -206,6 +206,40 @@ def test_verify_employee_fail():
     assert "thất bại" in json_data["reason"]
     assert json_data["similarity"] == pytest.approx(0.0)
 
+def test_admin_metrics_unauthorized():
+    """Truy cập /admin/metrics không có xác thực phải trả về 401."""
+    response = client.get("/api/v1/admin/metrics")
+    assert response.status_code == 401
+
+def test_admin_metrics_wrong_credentials():
+    """Truy cập /admin/metrics với sai mật khẩu phải trả về 401."""
+    import base64
+    bad_creds = base64.b64encode(b"admin:wrongpassword").decode()
+    response = client.get(
+        "/api/v1/admin/metrics",
+        headers={"Authorization": f"Basic {bad_creds}"}
+    )
+    assert response.status_code == 401
+
+def test_admin_metrics_authorized():
+    """Truy cập /admin/metrics với đúng tài khoản phải trả về 200 và các trường hợp lệ."""
+    import base64
+    from app.config import settings
+    creds = base64.b64encode(
+        f"{settings.ADMIN_USERNAME}:{settings.ADMIN_PASSWORD}".encode()
+    ).decode()
+    response = client.get(
+        "/api/v1/admin/metrics",
+        headers={"Authorization": f"Basic {creds}"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "system" in data
+    assert "database" in data
+    assert "service" in data
+    assert "cpu_percent" in data["system"]
+    assert "memory_percent" in data["system"]
+
 # Clean up patchers at exit
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_patchers():

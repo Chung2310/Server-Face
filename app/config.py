@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     MONGODB_PASSWORD: Optional[str] = None
     MONGODB_AUTH_SOURCE: str = "admin"
 
+    # Admin Panel credentials
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "admin123"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()

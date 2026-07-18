@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Server-Face | Admin Panel</title>
+  <meta name="description" content="Giao diện quản trị hệ thống nhận diện khuôn mặt Server-Face" />
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:    #0a0f1e;
+      --bg-secondary:  #0f172a;
+      --bg-card:       rgba(15, 23, 42, 0.8);
+      --border:        rgba(99, 102, 241, 0.18);
+      --border-hover:  rgba(99, 102, 241, 0.5);
+      --accent:        #6366f1;
+      --accent-light:  #818cf8;
+      --accent-glow:   rgba(99, 102, 241, 0.35);
+      --success:       #10b981;
+      --success-glow:  rgba(16, 185, 129, 0.3);
+      --danger:        #f43f5e;
+      --danger-glow:   rgba(244, 63, 94, 0.3);
+      --warning:       #f59e0b;
+      --text-primary:  #e2e8f0;
+      --text-secondary:#94a3b8;
+      --text-muted:    #475569;
+      --radius:        14px;
+      --radius-sm:     8px;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Animated background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(99,102,241,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99,102,241,0.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* Login Screen */
+    #login-screen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      background: var(--bg-primary);
+    }
+
+    .login-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 44px 48px;
+      width: 100%;
+      max-width: 420px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 0 60px rgba(99,102,241,0.12), 0 25px 50px rgba(0,0,0,0.5);
+      animation: slideUp 0.4s ease;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .login-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+
+    .login-logo-icon {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, var(--accent), #a855f7);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .login-logo h1 {
+      font-size: 20px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #e2e8f0, var(--accent-light));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .login-logo p { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; }
+
+    .form-group { margin-bottom: 18px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; }
+
+    .form-input {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(99,102,241,0.06);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      outline: none;
+    }
+
+    .form-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      width: 100%;
+      background: linear-gradient(135deg, var(--accent), #7c3aed);
+      color: #fff;
+      box-shadow: 0 4px 15px var(--accent-glow);
+      margin-top: 8px;
+    }
+
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px var(--accent-glow); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+    .btn-sm { padding: 7px 14px; font-size: 12px; }
+    .btn-danger { background: rgba(244,63,94,0.15); color: var(--danger); border: 1px solid rgba(244,63,94,0.25); }
+    .btn-danger:hover { background: rgba(244,63,94,0.25); }
+    .btn-ghost { background: rgba(99,102,241,0.1); color: var(--accent-light); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: rgba(99,102,241,0.2); border-color: var(--border-hover); }
+    .btn-success { background: rgba(16,185,129,0.15); color: var(--success); border: 1px solid rgba(16,185,129,0.25); }
+    .btn-success:hover { background: rgba(16,185,129,0.25); }
+
+    .error-msg {
+      color: var(--danger);
+      font-size: 12px;
+      margin-top: 12px;
+      text-align: center;
+      padding: 8px;
+      background: rgba(244,63,94,0.1);
+      border-radius: 6px;
+      border: 1px solid rgba(244,63,94,0.2);
+    }
+
+    /* Main App Layout */
+    #app { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
+
+    /* Header */
+    .header {
+      background: rgba(10, 15, 30, 0.9);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(20px);
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .header-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header-logo-icon {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, var(--accent), #a855f7);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    .header-logo span {
+      font-size: 16px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #e2e8f0, var(--accent-light));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .status-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 6px var(--success-glow);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .user-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(99,102,241,0.1);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 5px 14px 5px 8px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .user-chip-avatar {
+      width: 24px; height: 24px;
+      background: linear-gradient(135deg, var(--accent), #a855f7);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .logout-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      transition: color 0.2s;
+    }
+
+    .logout-btn:hover { color: var(--danger); }
+
+    /* Navigation Tabs */
+    .nav-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 20px 32px 0;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10, 15, 30, 0.5);
+    }
+
+    .nav-tab {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+      background: none;
+      border-top: none;
+      border-left: none;
+      border-right: none;
+      font-family: inherit;
+      margin-bottom: -1px;
+    }
+
+    .nav-tab:hover { color: var(--text-secondary); background: rgba(99,102,241,0.06); }
+    .nav-tab.active { color: var(--accent-light); border-bottom-color: var(--accent); background: rgba(99,102,241,0.08); }
+
+    /* Content Area */
+    .content { flex: 1; padding: 32px; max-width: 1280px; margin: 0 auto; width: 100%; }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      backdrop-filter: blur(20px);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .card:hover { border-color: var(--border-hover); box-shadow: 0 0 30px rgba(99,102,241,0.07); }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .card-value {
+      font-size: 36px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--text-primary), var(--accent-light));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .card-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Stat Grid */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    /* Metric Bars */
+    .metric-bar-wrap { margin-top: 14px; }
+    .metric-bar-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+    .metric-bar-track { height: 6px; background: rgba(99,102,241,0.12); border-radius: 99px; overflow: hidden; }
+    .metric-bar-fill { height: 100%; border-radius: 99px; transition: width 0.6s ease; }
+    .metric-bar-fill.cpu { background: linear-gradient(90deg, var(--accent), var(--accent-light)); box-shadow: 0 0 8px var(--accent-glow); }
+    .metric-bar-fill.mem { background: linear-gradient(90deg, #10b981, #34d399); box-shadow: 0 0 8px var(--success-glow); }
+
+    /* Section header */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-title-icon {
+      width: 32px; height: 32px;
+      background: rgba(99,102,241,0.15);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--accent-light);
+    }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { border-bottom: 1px solid var(--border); }
+    th {
+      text-align: left;
+      padding: 10px 16px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+    tbody tr {
+      border-bottom: 1px solid rgba(99,102,241,0.06);
+      transition: background 0.15s;
+    }
+    tbody tr:hover { background: rgba(99,102,241,0.04); }
+    tbody tr:last-child { border-bottom: none; }
+    td { padding: 14px 16px; font-size: 13px; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .badge-success { background: rgba(16,185,129,0.12); color: var(--success); border: 1px solid rgba(16,185,129,0.2); }
+    .badge-danger  { background: rgba(244,63,94,0.12);  color: var(--danger);  border: 1px solid rgba(244,63,94,0.2); }
+    .badge-info    { background: rgba(99,102,241,0.12); color: var(--accent-light); border: 1px solid rgba(99,102,241,0.2); }
+    .badge-warning { background: rgba(245,158,11,0.12); color: var(--warning); border: 1px solid rgba(245,158,11,0.2); }
+
+    /* Form Upload */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: rgba(99,102,241,0.03);
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(99,102,241,0.08);
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+    .upload-zone p { font-size: 13px; color: var(--text-muted); margin-top: 10px; }
+
+    .preview-wrap { position: relative; display: inline-block; }
+    .preview-wrap img { max-width: 100%; max-height: 280px; border-radius: var(--radius-sm); display: block; }
+    .preview-canvas {
+      position: absolute;
+      top: 0; left: 0;
+      pointer-events: none;
+      border-radius: var(--radius-sm);
+    }
+
+    /* Alert Result */
+    .result-box {
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      border: 1px solid;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .result-box.success { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.25); color: #34d399; }
+    .result-box.danger  { background: rgba(244,63,94,0.08);  border-color: rgba(244,63,94,0.25);  color: #fb7185; }
+    .result-box.info    { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.25); color: var(--accent-light); }
+
+    /* Similarity Gauge */
+    .gauge-wrap { text-align: center; padding: 12px 0; }
+    .gauge-value { font-size: 48px; font-weight: 800; line-height: 1; }
+    .gauge-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Grid layout helpers */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    .mb-20 { margin-bottom: 20px; }
+    .mb-12 { margin-bottom: 12px; }
+    .mt-16 { margin-top: 16px; }
+    .mt-12 { margin-top: 12px; }
+    .gap-8 { gap: 8px; }
+
+    .flex { display: flex; }
+    .flex-col { flex-direction: column; }
+    .items-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .flex-wrap { flex-wrap: wrap; }
+
+    /* Loading spinner */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .text-muted { color: var(--text-muted); font-size: 13px; }
+    .text-center { text-align: center; }
+    .py-40 { padding: 40px 0; }
+
+    /* Empty state */
+    .empty-state { text-align: center; padding: 60px 20px; }
+    .empty-state svg { color: var(--text-muted); opacity: 0.4; margin-bottom: 16px; }
+    .empty-state p { color: var(--text-muted); font-size: 14px; }
+
+    /* Input row */
+    .input-row { display: flex; gap: 12px; align-items: flex-end; }
+    .input-row .form-group { flex: 1; margin-bottom: 0; }
+
+    /* Toast */
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 999; display: flex; flex-direction: column; gap: 10px; }
+    .toast {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 18px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      backdrop-filter: blur(20px);
+      animation: toastIn 0.3s ease;
+      max-width: 340px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+    .toast.success { background: rgba(16,185,129,0.2); border: 1px solid rgba(16,185,129,0.3); color: #34d399; }
+    .toast.error   { background: rgba(244,63,94,0.2);  border: 1px solid rgba(244,63,94,0.3);  color: #fb7185; }
+    .toast.info    { background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.3); color: var(--accent-light); }
+  </style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Login Screen -->
+  <div id="login-screen" v-if="!isLoggedIn">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="login-logo-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="8" r="5"/>
+            <path d="M20 21a8 8 0 0 0-16 0"/>
+            <circle cx="12" cy="8" r="2" fill="white" stroke="none"/>
+          </svg>
+        </div>
+        <div>
+          <h1>Server-Face</h1>
+          <p>Admin Panel</p>
+        </div>
+      </div>
+
+      <form @submit.prevent="doLogin">
+        <div class="form-group">
+          <label>Tên đăng nhập</label>
+          <input id="login-username" v-model="loginForm.username" type="text" class="form-input" placeholder="admin" autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label>Mật khẩu</label>
+          <input id="login-password" v-model="loginForm.password" type="password" class="form-input" placeholder="••••••••" autocomplete="current-password" required />
+        </div>
+        <div class="error-msg" v-if="loginError">{{ loginError }}</div>
+        <button id="login-submit" type="submit" class="btn btn-primary" :disabled="loginLoading">
+          <span class="spinner" v-if="loginLoading"></span>
+          <span>{{ loginLoading ? 'Đang xác thực...' : 'Đăng nhập' }}</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <template v-if="isLoggedIn">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-logo">
+        <div class="header-logo-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="8" r="5"/>
+            <path d="M20 21a8 8 0 0 0-16 0"/>
+          </svg>
+        </div>
+        <span>Server-Face Admin</span>
+      </div>
+      <div class="header-right">
+        <div class="status-dot">
+          <span class="dot"></span>
+          <span>Trực tuyến</span>
+        </div>
+        <div class="user-chip">
+          <div class="user-chip-avatar">{{ currentUser.charAt(0).toUpperCase() }}</div>
+          {{ currentUser }}
+        </div>
+        <button class="logout-btn" @click="logout" title="Đăng xuất">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="nav-tabs">
+      <button id="tab-dashboard" class="nav-tab" :class="{ active: activeTab === 'dashboard' }" @click="activeTab = 'dashboard'">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Tổng quan
+      </button>
+      <button id="tab-registry" class="nav-tab" :class="{ active: activeTab === 'registry' }" @click="switchToRegistry">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+        Quản lý nhân viên
+      </button>
+      <button id="tab-simulator" class="nav-tab" :class="{ active: activeTab === 'simulator' }" @click="activeTab = 'simulator'">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Kiểm thử check-in
+      </button>
+    </nav>
+
+    <!-- Tab: Dashboard -->
+    <main class="content" v-if="activeTab === 'dashboard'">
+      <div class="section-header">
+        <div class="section-title">
+          <div class="section-title-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </div>
+          Bảng tổng quan
+        </div>
+        <button class="btn btn-ghost btn-sm" @click="fetchMetrics" :disabled="metricsLoading">
+          <span class="spinner" v-if="metricsLoading"></span>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Làm mới
+        </button>
+      </div>
+
+      <!-- Stat cards -->
+      <div class="stat-grid">
+        <div class="card">
+          <div class="card-title">Nhân viên đã đăng ký</div>
+          <div class="card-value">{{ metrics ? metrics.database.total_registered_employees : '—' }}</div>
+          <div class="card-sub">Khuôn mặt trong CSDL</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Trạng thái MongoDB</div>
+          <div class="card-value" style="font-size:20px; margin-top:8px;">
+            <span class="badge" :class="metrics && metrics.database.status === 'connected' ? 'badge-success' : 'badge-danger'">
+              <span class="dot" :style="{ background: metrics && metrics.database.status === 'connected' ? 'var(--success)' : 'var(--danger)', 'box-shadow': 'none' }"></span>
+              {{ metrics ? (metrics.database.status === 'connected' ? 'Kết nối' : 'Mất kết nối') : '—' }}
+            </span>
+          </div>
+          <div class="card-sub">{{ metrics ? metrics.database.status : '' }}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Model AI</div>
+          <div class="card-value" style="font-size:22px; margin-top:6px;">{{ metrics ? metrics.service.model : '—' }}</div>
+          <div class="card-sub">Ngưỡng: {{ metrics ? (metrics.service.similarity_threshold * 100).toFixed(0) + '%' : '—' }}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Cập nhật lần cuối</div>
+          <div class="card-value" style="font-size:16px; margin-top:12px;">{{ lastUpdated || '—' }}</div>
+          <div class="card-sub">Thời gian máy chủ (UTC)</div>
+        </div>
+      </div>
+
+      <!-- System metrics -->
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">CPU Processor</div>
+          <div class="metric-bar-wrap">
+            <div class="metric-bar-label">
+              <span>Mức sử dụng</span>
+              <span>{{ metrics ? metrics.system.cpu_percent + '%' : '—' }}</span>
+            </div>
+            <div class="metric-bar-track">
+              <div class="metric-bar-fill cpu" :style="{ width: metrics ? metrics.system.cpu_percent + '%' : '0%' }"></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">RAM Memory</div>
+          <div class="metric-bar-wrap">
+            <div class="metric-bar-label">
+              <span>{{ metrics ? metrics.system.memory_used_mb + ' MB / ' + metrics.system.memory_total_mb + ' MB' : '—' }}</span>
+              <span>{{ metrics ? metrics.system.memory_percent + '%' : '—' }}</span>
+            </div>
+            <div class="metric-bar-track">
+              <div class="metric-bar-fill mem" :style="{ width: metrics ? metrics.system.memory_percent + '%' : '0%' }"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Tab: Registry -->
+    <main class="content" v-if="activeTab === 'registry'">
+      <div class="section-header mb-20">
+        <div class="section-title">
+          <div class="section-title-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+          </div>
+          Quản lý nhân viên
+        </div>
+        <button class="btn btn-ghost btn-sm" @click="fetchRegistry">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Tải lại
+        </button>
+      </div>
+
+      <div class="grid-2">
+        <!-- Register Form -->
+        <div class="card">
+          <div class="card-title mb-12">Đăng ký khuôn mặt mới</div>
+          <div class="form-group">
+            <label>Mã nhân viên (user_id)</label>
+            <input id="reg-userid" v-model="regForm.userId" type="text" class="form-input" placeholder="VD: NV001" />
+          </div>
+          <div class="form-group">
+            <label>Ảnh khuôn mặt</label>
+            <div class="upload-zone" @click="$refs.regFileInput.click()" @dragover.prevent="regDragOver = true" @dragleave="regDragOver = false" @drop.prevent="onRegFileDrop" :class="{ dragover: regDragOver }">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin: 0 auto; color: var(--text-muted)"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <p>Nhấp để chọn hoặc kéo thả ảnh vào đây</p>
+              <input type="file" ref="regFileInput" style="display:none" accept="image/*" @change="onRegFileChange" />
+            </div>
+          </div>
+          <div class="preview-wrap mb-12" v-if="regPreviewUrl" style="margin-bottom:14px">
+            <img :src="regPreviewUrl" ref="regPreviewImg" @load="drawRegBoxes" />
+            <canvas class="preview-canvas" ref="regCanvas"></canvas>
+          </div>
+          <div class="result-box info mt-12" v-if="regDetectInfo" style="margin-bottom:12px">{{ regDetectInfo }}</div>
+          <button id="reg-submit" class="btn btn-primary" @click="registerFace" :disabled="regLoading || !regForm.userId || !regForm.file">
+            <span class="spinner" v-if="regLoading"></span>
+            <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            {{ regLoading ? 'Đang đăng ký...' : 'Đăng ký nhân viên' }}
+          </button>
+        </div>
+
+        <!-- Registry Table -->
+        <div class="card">
+          <div class="flex items-center justify-between mb-12">
+            <div class="card-title" style="margin-bottom:0">Danh sách đã đăng ký</div>
+            <span class="badge badge-info">{{ registry.length }} nhân viên</span>
+          </div>
+          <div class="form-group mb-12" style="margin-bottom:14px">
+            <input id="search-userid" v-model="searchQuery" type="text" class="form-input" placeholder="Tìm kiếm theo mã nhân viên..." />
+          </div>
+
+          <div class="table-wrap" v-if="filteredRegistry.length > 0">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mã NV</th>
+                  <th>Ngày đăng ký</th>
+                  <th style="text-align:right">Hành động</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="emp in filteredRegistry" :key="emp.user_id">
+                  <td>
+                    <span class="badge badge-info">{{ emp.user_id }}</span>
+                  </td>
+                  <td class="text-muted">{{ formatDate(emp.registered_at) }}</td>
+                  <td style="text-align:right">
+                    <button class="btn btn-danger btn-sm" @click="deleteEmployee(emp.user_id)" :disabled="deleteLoading === emp.user_id">
+                      <span class="spinner" v-if="deleteLoading === emp.user_id"></span>
+                      <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                      Xóa
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="empty-state" v-else>
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+            <p>{{ searchQuery ? 'Không tìm thấy nhân viên phù hợp' : 'Chưa có nhân viên nào được đăng ký' }}</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Tab: Simulator -->
+    <main class="content" v-if="activeTab === 'simulator'">
+      <div class="section-header mb-20">
+        <div class="section-title">
+          <div class="section-title-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </div>
+          Phòng thử nghiệm check-in
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <!-- Input Panel -->
+        <div class="card">
+          <div class="card-title mb-12">Thông tin thử nghiệm</div>
+          <div class="form-group">
+            <label>Mã nhân viên cần xác thực</label>
+            <input id="sim-userid" v-model="simForm.userId" type="text" class="form-input" placeholder="VD: NV001" list="sim-employees" />
+            <datalist id="sim-employees">
+              <option v-for="emp in registry" :value="emp.user_id" />
+            </datalist>
+          </div>
+          <div class="form-group">
+            <label>Ảnh check-in thử nghiệm</label>
+            <div class="upload-zone" @click="$refs.simFileInput.click()">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin: 0 auto; color: var(--text-muted)"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              <p>Nhấp để tải ảnh check-in lên</p>
+              <input type="file" ref="simFileInput" style="display:none" accept="image/*" @change="onSimFileChange" />
+            </div>
+          </div>
+          <div class="preview-wrap mb-12" v-if="simPreviewUrl" style="margin-bottom:14px">
+            <img :src="simPreviewUrl" ref="simPreviewImg" style="max-width:100%; max-height:220px; border-radius:8px; display:block;" />
+          </div>
+          <button id="sim-submit" class="btn btn-primary" @click="runSimulation" :disabled="simLoading || !simForm.userId || !simForm.file">
+            <span class="spinner" v-if="simLoading"></span>
+            <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            {{ simLoading ? 'Đang xác thực...' : 'Chạy thử nghiệm' }}
+          </button>
+        </div>
+
+        <!-- Result Panel -->
+        <div class="card">
+          <div class="card-title mb-12">Kết quả xác thực</div>
+
+          <div class="empty-state py-40" v-if="!simResult && !simLoading">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <p>Chưa có kết quả. Điền thông tin và nhấn "Chạy thử nghiệm".</p>
+          </div>
+
+          <div v-if="simLoading" class="text-center py-40">
+            <span class="spinner" style="width:32px; height:32px; border-width:3px;"></span>
+            <p class="text-muted" style="margin-top:16px;">Đang phân tích khuôn mặt...</p>
+          </div>
+
+          <div v-if="simResult && !simLoading">
+            <!-- Overall verdict -->
+            <div class="result-box mb-12" :class="simResult.verified ? 'success' : 'danger'" style="margin-bottom:16px">
+              <div style="font-size:18px; font-weight:700; margin-bottom:6px;">
+                {{ simResult.verified ? '✅ Xác thực thành công' : '❌ Xác thực thất bại' }}
+              </div>
+              <div>{{ simResult.reason }}</div>
+            </div>
+
+            <!-- Similarity gauge -->
+            <div class="card" style="padding:16px; margin-bottom:16px;" v-if="simResult.similarity !== null && simResult.similarity !== undefined">
+              <div class="gauge-wrap">
+                <div class="gauge-value" :style="{ color: simResult.verified ? 'var(--success)' : 'var(--danger)' }">
+                  {{ (simResult.similarity * 100).toFixed(1) }}%
+                </div>
+                <div class="gauge-label">Độ tương đồng khuôn mặt</div>
+                <div class="metric-bar-track" style="margin-top:12px; height:8px;">
+                  <div class="metric-bar-fill" :style="{ width: (simResult.similarity * 100) + '%', background: simResult.verified ? 'linear-gradient(90deg, var(--success), #34d399)' : 'linear-gradient(90deg, var(--danger), #fb7185)', 'box-shadow': simResult.verified ? '0 0 8px var(--success-glow)' : '0 0 8px var(--danger-glow)' }"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:var(--text-muted)">
+                  <span>0%</span>
+                  <span>Ngưỡng: {{ (simResult.threshold * 100).toFixed(0) }}%</span>
+                  <span>100%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Meta info -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <div class="result-box info">
+                <div style="font-size:11px; color: var(--text-muted); margin-bottom:4px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em">Mã nhân viên</div>
+                <div style="font-weight:600">{{ simResult.user_id }}</div>
+              </div>
+              <div class="result-box info">
+                <div style="font-size:11px; color: var(--text-muted); margin-bottom:4px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em">Khuôn mặt phát hiện</div>
+                <div style="font-weight:600">{{ simResult.faces_detected ?? '—' }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </template>
+
+  <!-- Toast notifications -->
+  <div class="toast-container">
+    <div class="toast" :class="t.type" v-for="t in toasts" :key="t.id">
+      <span>{{ t.msg }}</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+createApp({
+  setup() {
+    // ── Auth ──────────────────────────────────────────────
+    const isLoggedIn = ref(false);
+    const currentUser = ref('');
+    const authHeader  = ref('');
+    const loginForm   = ref({ username: '', password: '' });
+    const loginError  = ref('');
+    const loginLoading = ref(false);
+
+    async function doLogin() {
+      loginLoading.value = true;
+      loginError.value = '';
+      const creds = btoa(`${loginForm.value.username}:${loginForm.value.password}`);
+      try {
+        const res = await fetch('/api/v1/admin/metrics', {
+          headers: { Authorization: `Basic ${creds}` }
+        });
+        if (res.status === 401) {
+          loginError.value = 'Tên đăng nhập hoặc mật khẩu không đúng.';
+        } else if (res.ok) {
+          authHeader.value = `Basic ${creds}`;
+          currentUser.value = loginForm.value.username;
+          isLoggedIn.value  = true;
+          const data = await res.json();
+          metrics.value = data;
+          lastUpdated.value = new Date().toLocaleTimeString('vi-VN');
+          fetchRegistry();
+        } else {
+          loginError.value = 'Đã xảy ra lỗi kết nối đến máy chủ.';
+        }
+      } catch {
+        loginError.value = 'Không thể kết nối đến máy chủ.';
+      } finally {
+        loginLoading.value = false;
+      }
+    }
+
+    function logout() {
+      isLoggedIn.value  = false;
+      authHeader.value  = '';
+      currentUser.value = '';
+      loginForm.value   = { username: '', password: '' };
+      loginError.value  = '';
+      metrics.value     = null;
+      registry.value    = [];
+    }
+
+    // ── Tabs ──────────────────────────────────────────────
+    const activeTab = ref('dashboard');
+
+    function switchToRegistry() {
+      activeTab.value = 'registry';
+      if (registry.value.length === 0) fetchRegistry();
+    }
+
+    // ── Metrics ───────────────────────────────────────────
+    const metrics = ref(null);
+    const lastUpdated = ref('');
+    const metricsLoading = ref(false);
+
+    async function fetchMetrics() {
+      metricsLoading.value = true;
+      try {
+        const res = await fetch('/api/v1/admin/metrics', {
+          headers: { Authorization: authHeader.value }
+        });
+        if (res.ok) {
+          metrics.value = await res.json();
+          lastUpdated.value = new Date().toLocaleTimeString('vi-VN');
+        }
+      } catch { showToast('Không thể tải thông số hệ thống.', 'error'); }
+      finally { metricsLoading.value = false; }
+    }
+
+    // ── Registry ──────────────────────────────────────────
+    const registry = ref([]);
+    const searchQuery = ref('');
+    const deleteLoading = ref(null);
+
+    const filteredRegistry = computed(() =>
+      registry.value.filter(e =>
+        e.user_id.toLowerCase().includes(searchQuery.value.toLowerCase())
+      )
+    );
+
+    async function fetchRegistry() {
+      try {
+        const res = await fetch('/api/v1/face/list', {
+          headers: { Authorization: authHeader.value }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          registry.value = Array.isArray(data) ? data : (data.employees ?? data.data ?? []);
+        }
+      } catch { /* ignore */ }
+    }
+
+    async function deleteEmployee(userId) {
+      if (!confirm(`Bạn có chắc chắn muốn xóa nhân viên "${userId}" không?`)) return;
+      deleteLoading.value = userId;
+      try {
+        const res = await fetch(`/api/v1/face/register/${userId}`, {
+          method: 'DELETE',
+          headers: { Authorization: authHeader.value }
+        });
+        if (res.ok) {
+          registry.value = registry.value.filter(e => e.user_id !== userId);
+          showToast(`Đã xóa nhân viên ${userId} thành công.`, 'success');
+          if (metrics.value) metrics.value.database.total_registered_employees--;
+        } else {
+          showToast('Không thể xóa nhân viên này.', 'error');
+        }
+      } catch { showToast('Lỗi kết nối khi xóa nhân viên.', 'error'); }
+      finally { deleteLoading.value = null; }
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '—';
+      try { return new Date(dateStr).toLocaleString('vi-VN'); }
+      catch { return dateStr; }
+    }
+
+    // ── Register ──────────────────────────────────────────
+    const regForm = ref({ userId: '', file: null });
+    const regPreviewUrl = ref('');
+    const regDetectInfo = ref('');
+    const regDragOver   = ref(false);
+    const regLoading    = ref(false);
+    const regPreviewImg = ref(null);
+    const regCanvas     = ref(null);
+    let regDetectBoxes  = [];
+
+    function onRegFileChange(e) { setRegFile(e.target.files[0]); }
+    function onRegFileDrop(e)   { setRegFile(e.dataTransfer.files[0]); regDragOver.value = false; }
+
+    function setRegFile(file) {
+      if (!file) return;
+      regForm.value.file = file;
+      regPreviewUrl.value = URL.createObjectURL(file);
+      regDetectInfo.value = '';
+      regDetectBoxes = [];
+      // Auto-detect faces
+      setTimeout(() => detectRegFaces(file), 300);
+    }
+
+    async function detectRegFaces(file) {
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const res = await fetch('/api/v1/face/detect', {
+          method: 'POST',
+          headers: { Authorization: authHeader.value },
+          body: fd
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const faces = data.faces ?? data;
+          regDetectBoxes = faces;
+          regDetectInfo.value = `Phát hiện ${faces.length} khuôn mặt trong ảnh.`;
+          drawRegBoxes();
+        }
+      } catch { /* silent */ }
+    }
+
+    function drawRegBoxes() {
+      const img = regPreviewImg.value;
+      const canvas = regCanvas.value;
+      if (!img || !canvas || !regDetectBoxes.length) return;
+      canvas.width  = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.style.width  = img.clientWidth  + 'px';
+      canvas.style.height = img.clientHeight + 'px';
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      regDetectBoxes.forEach(face => {
+        const bbox = face.bbox ?? face.box ?? face;
+        if (!bbox || bbox.length < 4) return;
+        const [x1, y1, x2, y2] = bbox;
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = Math.max(2, canvas.width / 200);
+        ctx.shadowColor = '#6366f1';
+        ctx.shadowBlur = 8;
+        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+        // Landmarks
+        const lm = face.kps ?? face.landmark ?? face.landmarks;
+        if (lm && lm.length) {
+          ctx.fillStyle = '#10b981';
+          ctx.shadowColor = '#10b981';
+          lm.forEach(pt => {
+            const [px, py] = Array.isArray(pt) ? pt : [pt.x, pt.y];
+            ctx.beginPath();
+            ctx.arc(px, py, Math.max(2, canvas.width / 300), 0, 2 * Math.PI);
+            ctx.fill();
+          });
+        }
+      });
+    }
+
+    async function registerFace() {
+      if (!regForm.value.userId || !regForm.value.file) return;
+      regLoading.value = true;
+      const fd = new FormData();
+      fd.append('user_id', regForm.value.userId);
+      fd.append('file', regForm.value.file);
+      try {
+        const res = await fetch('/api/v1/face/register', {
+          method: 'POST',
+          headers: { Authorization: authHeader.value },
+          body: fd
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(`Đăng ký thành công nhân viên ${regForm.value.userId}.`, 'success');
+          regForm.value = { userId: '', file: null };
+          regPreviewUrl.value = '';
+          regDetectInfo.value = '';
+          regDetectBoxes = [];
+          fetchRegistry();
+          if (metrics.value) metrics.value.database.total_registered_employees++;
+        } else {
+          showToast(data.detail ?? 'Đăng ký thất bại.', 'error');
+        }
+      } catch { showToast('Lỗi kết nối khi đăng ký.', 'error'); }
+      finally { regLoading.value = false; }
+    }
+
+    // ── Simulator ─────────────────────────────────────────
+    const simForm = ref({ userId: '', file: null });
+    const simPreviewUrl = ref('');
+    const simResult     = ref(null);
+    const simLoading    = ref(false);
+
+    function onSimFileChange(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      simForm.value.file = file;
+      simPreviewUrl.value = URL.createObjectURL(file);
+      simResult.value = null;
+    }
+
+    async function runSimulation() {
+      if (!simForm.value.userId || !simForm.value.file) return;
+      simLoading.value = true;
+      simResult.value  = null;
+      const fd = new FormData();
+      fd.append('user_id', simForm.value.userId);
+      fd.append('file', simForm.value.file);
+      try {
+        const res = await fetch('/api/v1/face/verify-employee', {
+          method: 'POST',
+          headers: { Authorization: authHeader.value },
+          body: fd
+        });
+        const data = await res.json();
+        simResult.value = data;
+      } catch { showToast('Lỗi kết nối khi chạy thử nghiệm.', 'error'); }
+      finally { simLoading.value = false; }
+    }
+
+    // ── Toast ─────────────────────────────────────────────
+    const toasts = ref([]);
+    function showToast(msg, type = 'info') {
+      const id = Date.now();
+      toasts.value.push({ id, msg, type });
+      setTimeout(() => { toasts.value = toasts.value.filter(t => t.id !== id); }, 3500);
+    }
+
+    return {
+      // auth
+      isLoggedIn, currentUser, loginForm, loginError, loginLoading, doLogin, logout,
+      // tabs
+      activeTab, switchToRegistry,
+      // metrics
+      metrics, lastUpdated, metricsLoading, fetchMetrics,
+      // registry
+      registry, searchQuery, filteredRegistry, deleteLoading, fetchRegistry, deleteEmployee, formatDate,
+      // register
+      regForm, regPreviewUrl, regDetectInfo, regDragOver, regLoading, regPreviewImg, regCanvas,
+      onRegFileChange, onRegFileDrop, drawRegBoxes, registerFace,
+      // sim
+      simForm, simPreviewUrl, simResult, simLoading, onSimFileChange, runSimulation,
+      // toasts
+      toasts,
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
