@@ -444,6 +444,21 @@
       pointer-events: none;
       border-radius: var(--radius-sm);
     }
+    .camera-wrap {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #000;
+      margin-bottom: 14px;
+    }
+    .camera-wrap video {
+      width: 100%;
+      max-height: 360px;
+      display: block;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    .camera-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
 
     /* Alert Result */
     .result-box {
@@ -798,6 +813,15 @@
               <input type="file" ref="simFileInput" style="display:none" accept="image/*" @change="onSimFileChange" />
             </div>
           </div>
+          <div class="camera-actions">
+            <button type="button" class="btn btn-ghost" @click="startCamera" v-if="!cameraActive">Mở camera</button>
+            <button type="button" class="btn btn-primary" @click="captureCamera" v-if="cameraActive">Chụp ảnh</button>
+            <button type="button" class="btn btn-danger" @click="stopCamera" v-if="cameraActive">Đóng camera</button>
+          </div>
+          <div class="camera-wrap" v-show="cameraActive">
+            <video ref="cameraVideo" autoplay playsinline muted></video>
+          </div>
+          <canvas ref="cameraCanvas" style="display:none"></canvas>
           <div class="preview-wrap mb-12" v-if="simPreviewUrl" style="margin-bottom:14px">
             <img :src="simPreviewUrl" ref="simPreviewImg" style="max-width:100%; max-height:220px; border-radius:8px; display:block;" />
           </div>
@@ -876,7 +900,7 @@
 </div>
 
 <script>
-const { createApp, ref, computed, onMounted } = Vue;
+const { createApp, ref, computed, watch, onMounted, onBeforeUnmount } = Vue;
 
 createApp({
   setup() {
@@ -919,6 +943,7 @@ createApp({
     }
 
     async function logout() {
+      stopCamera();
       try {
         await fetch('/api/v1/admin/logout', { method: 'POST', credentials: 'same-origin' });
       } catch { /* ignore */ }
@@ -1130,6 +1155,70 @@ createApp({
     const simPreviewUrl = ref('');
     const simResult     = ref(null);
     const simLoading    = ref(false);
+    const cameraVideo   = ref(null);
+    const cameraCanvas  = ref(null);
+    const cameraActive  = ref(false);
+    let cameraStream = null;
+
+    async function startCamera() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        showToast('Trình duyệt không hỗ trợ camera hoặc trang chưa chạy bằng HTTPS.', 'error');
+        return;
+      }
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        cameraActive.value = true;
+        await Vue.nextTick();
+        cameraVideo.value.srcObject = cameraStream;
+        await cameraVideo.value.play();
+      } catch (error) {
+        stopCamera();
+        const denied = error?.name === 'NotAllowedError';
+        showToast(denied ? 'Bạn chưa cấp quyền truy cập camera.' : 'Không thể mở camera trên thiết bị này.', 'error');
+      }
+    }
+
+    function stopCamera() {
+      if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+      cameraStream = null;
+      cameraActive.value = false;
+      if (cameraVideo.value) cameraVideo.value.srcObject = null;
+    }
+
+    function captureCamera() {
+      const video = cameraVideo.value;
+      const canvas = cameraCanvas.value;
+      if (!video?.videoWidth || !video?.videoHeight || !canvas) {
+        showToast('Camera chưa sẵn sàng để chụp.', 'error');
+        return;
+      }
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      context.translate(canvas.width, 0);
+      context.scale(-1, 1);
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => {
+        if (!blob) {
+          showToast('Không thể tạo ảnh từ camera.', 'error');
+          return;
+        }
+        if (simPreviewUrl.value?.startsWith('blob:')) URL.revokeObjectURL(simPreviewUrl.value);
+        simForm.value.file = new File([blob], `checkin-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        simPreviewUrl.value = URL.createObjectURL(blob);
+        simResult.value = null;
+        stopCamera();
+        showToast('Đã chụp ảnh check-in.', 'success');
+      }, 'image/jpeg', 0.92);
+    }
+
+    onBeforeUnmount(stopCamera);
+    watch(activeTab, (nextTab, previousTab) => {
+      if (previousTab === 'simulator' && nextTab !== 'simulator') stopCamera();
+    });
 
     function onSimFileChange(e) {
       const file = e.target.files[0];
@@ -1180,6 +1269,7 @@ createApp({
       onRegFileChange, onRegFileDrop, drawRegBoxes, registerFace,
       // sim
       simForm, simPreviewUrl, simResult, simLoading, onSimFileChange, runSimulation,
+      cameraVideo, cameraCanvas, cameraActive, startCamera, stopCamera, captureCamera,
       // toasts
       toasts,
     };
