@@ -1,7 +1,7 @@
 services:
   igen-insightface:
     build: .
-    image: ghcr.io/chung2310/igen-insightface:${IMAGE_TAG:-latest}
+    image: ghcr.io/chung2310/server-face:${IMAGE_TAG:-latest}
     container_name: ${CONTAINER_NAME:-igen-insightface}
     restart: always
     ports:
