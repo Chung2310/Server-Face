@@ -1,10 +1,12 @@
 import os
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from app.config import settings
 from app.routers import face, health, admin
 from app.services.face_analysis import FaceAnalysisService
@@ -43,6 +45,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Custom Validation Error Handler
+# Fixes UnicodeDecodeError when FastAPI tries to encode binary file bytes in validation errors
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    safe_errors = []
+    for error in exc.errors():
+        safe_error = {}
+        for key, val in error.items():
+            if isinstance(val, bytes):
+                safe_error[key] = f"<binary data {len(val)} bytes>"
+            elif isinstance(val, (list, tuple)):
+                safe_error[key] = [str(v) if isinstance(v, bytes) else v for v in val]
+            else:
+                safe_error[key] = val
+        safe_errors.append(safe_error)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": safe_errors}
+    )
 
 # Include Routers with v1 prefixing
 app.include_router(health.router, prefix=settings.API_PREFIX)
