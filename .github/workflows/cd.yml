@@ -100,6 +100,8 @@ jobs:
           port: ${{ secrets.SSH_PORT || '22' }}
           envs: ENV_FILE_CONTENT
           script: |
+            set -Eeuo pipefail
+
             TARGET_DIR="/opt/igen-insightface/staging"
             IMAGE_TAG="develop"
             CONTAINER_NAME="igen-insightface-staging"
@@ -114,7 +116,7 @@ jobs:
             export COMPOSE_PROJECT_NAME="$CONTAINER_NAME"
             IMAGE_TAG="$IMAGE_TAG" CONTAINER_NAME="$CONTAINER_NAME" docker compose pull
 
-            IMAGE_TAG="$IMAGE_TAG" CONTAINER_NAME="$CONTAINER_NAME" docker compose up -d --remove-orphans
+            IMAGE_TAG="$IMAGE_TAG" CONTAINER_NAME="$CONTAINER_NAME" docker compose up -d --pull always --no-build --remove-orphans
 
             docker image prune -f
 
@@ -142,6 +144,8 @@ jobs:
           port: ${{ secrets.SSH_PORT_PROD || '22' }}
           envs: ENV_FILE_CONTENT
           script: |
+            set -Eeuo pipefail
+
             TARGET_DIR="/opt/igen-insightface/production"
             IMAGE_TAG="production"
             CONTAINER_NAME="igen-insightface-production"
@@ -156,6 +160,6 @@ jobs:
             export COMPOSE_PROJECT_NAME="$CONTAINER_NAME"
             IMAGE_TAG="$IMAGE_TAG" CONTAINER_NAME="$CONTAINER_NAME" docker compose pull
 
-            IMAGE_TAG="$IMAGE_TAG" CONTAINER_NAME="$CONTAINER_NAME" docker compose up -d --remove-orphans
+            IMAGE_TAG="$IMAGE_TAG" CONTAINER_NAME="$CONTAINER_NAME" docker compose up -d --pull always --no-build --remove-orphans
 
             docker image prune -f
