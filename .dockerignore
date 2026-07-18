@@ -1,0 +1,22 @@
+# Ignore python virtual environments
+.venv/
+venv/
+ENV/
+
+# Ignore compiled python files
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Ignore git and pipeline configurations
+.git/
+.github/
+
+# Ignore local tests and live test scripts
+tests/
+test_live_api.py
+
+# Ignore docker configuration
+docker-compose.yml
+Dockerfile

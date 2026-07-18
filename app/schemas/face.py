@@ -1,0 +1,53 @@
+from typing import List, Optional
+from pydantic import BaseModel, Field
+
+class BoundingBox(BaseModel):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+class FaceLandmark(BaseModel):
+    x: float
+    y: float
+
+class FaceDetectionResponse(BaseModel):
+    bbox: BoundingBox
+    confidence: float = Field(..., description="Detection confidence score")
+    landmarks: List[FaceLandmark] = Field(..., description="5 facial landmarks (eyes, nose, mouth corners)")
+    gender: Optional[str] = None
+    age: Optional[float] = None
+
+class FaceEmbeddingResponse(BaseModel):
+    bbox: BoundingBox
+    embedding: List[float] = Field(..., description="512-dimensional face embedding")
+
+class VerifyEmbeddingsRequest(BaseModel):
+    embedding1: List[float] = Field(..., description="First 512-dimensional embedding")
+    embedding2: List[float] = Field(..., description="Second 512-dimensional embedding")
+
+class VerifyResponse(BaseModel):
+    similarity: float = Field(..., description="Cosine similarity score")
+    verified: bool = Field(..., description="True if similarity meets or exceeds threshold")
+    threshold: float = Field(..., description="The similarity threshold used")
+
+class SearchRegisterRequest(BaseModel):
+    user_id: str = Field(..., description="Unique identifier for the user")
+    embedding: List[float] = Field(..., description="512-dimensional embedding to register")
+
+class SearchQueryRequest(BaseModel):
+    embedding: List[float] = Field(..., description="The query face embedding to search for")
+    limit: int = Field(5, description="Maximum number of matches to return")
+
+class SearchMatch(BaseModel):
+    user_id: str
+    similarity: float
+
+class SearchResponse(BaseModel):
+    matches: List[SearchMatch]
+
+class VerifyEmployeeResponse(BaseModel):
+    verified: bool = Field(..., description="True if verification succeeds")
+    reason: str = Field(..., description="Vietnamese explanation of the verification result")
+    similarity: Optional[float] = Field(None, description="Similarity score between the faces")
+

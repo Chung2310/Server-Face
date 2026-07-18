@@ -1,0 +1,29 @@
+services:
+  igen-insightface:
+    build: .
+    image: ghcr.io/chung2310/igen-insightface:${IMAGE_TAG:-latest}
+    container_name: ${CONTAINER_NAME:-igen-insightface}
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - .env:/app/.env
+      - C:\Users\PC\.insightface:/root/.insightface
+    networks:
+      - default_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default_network:
+    external: true
