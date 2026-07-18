@@ -14,9 +14,6 @@ services:
       - default_network
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     logging:
       driver: "json-file"
       options:
