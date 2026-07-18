@@ -748,7 +748,7 @@
                   <td>
                     <span class="badge badge-info">{{ emp.user_id }}</span>
                   </td>
-                  <td class="text-muted">{{ formatDate(emp.registered_at) }}</td>
+                  <td class="text-muted">{{ formatDate(emp.created_at) }}</td>
                   <td style="text-align:right">
                     <button class="btn btn-danger btn-sm" @click="deleteEmployee(emp.user_id)" :disabled="deleteLoading === emp.user_id">
                       <span class="spinner" v-if="deleteLoading === emp.user_id"></span>
@@ -883,7 +883,6 @@ createApp({
     // ── Auth ──────────────────────────────────────────────
     const isLoggedIn = ref(false);
     const currentUser = ref('');
-    const authHeader  = ref('');
     const loginForm   = ref({ username: '', password: '' });
     const loginError  = ref('');
     const loginLoading = ref(false);
@@ -891,20 +890,23 @@ createApp({
     async function doLogin() {
       loginLoading.value = true;
       loginError.value = '';
-      const creds = btoa(`${loginForm.value.username}:${loginForm.value.password}`);
       try {
-        const res = await fetch('/api/v1/admin/metrics', {
-          headers: { Authorization: `Basic ${creds}` }
+        const res = await fetch('/api/v1/admin/login', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: loginForm.value.username,
+            password: loginForm.value.password,
+          }),
         });
         if (res.status === 401) {
           loginError.value = 'Tên đăng nhập hoặc mật khẩu không đúng.';
         } else if (res.ok) {
-          authHeader.value = `Basic ${creds}`;
-          currentUser.value = loginForm.value.username;
-          isLoggedIn.value  = true;
           const data = await res.json();
-          metrics.value = data;
-          lastUpdated.value = new Date().toLocaleTimeString('vi-VN');
+          currentUser.value = data.username;
+          isLoggedIn.value  = true;
+          fetchMetrics();
           fetchRegistry();
         } else {
           loginError.value = 'Đã xảy ra lỗi kết nối đến máy chủ.';
@@ -916,15 +918,31 @@ createApp({
       }
     }
 
-    function logout() {
+    async function logout() {
+      try {
+        await fetch('/api/v1/admin/logout', { method: 'POST', credentials: 'same-origin' });
+      } catch { /* ignore */ }
       isLoggedIn.value  = false;
-      authHeader.value  = '';
       currentUser.value = '';
       loginForm.value   = { username: '', password: '' };
       loginError.value  = '';
       metrics.value     = null;
       registry.value    = [];
     }
+
+    // Restore session from HttpOnly cookie on page load
+    onMounted(async () => {
+      try {
+        const res = await fetch('/api/v1/admin/me', { credentials: 'same-origin' });
+        if (res.ok) {
+          const data = await res.json();
+          currentUser.value = data.username;
+          isLoggedIn.value  = true;
+          fetchMetrics();
+          fetchRegistry();
+        }
+      } catch { /* stay logged out */ }
+    });
 
     // ── Tabs ──────────────────────────────────────────────
     const activeTab = ref('dashboard');
@@ -942,9 +960,8 @@ createApp({
     async function fetchMetrics() {
       metricsLoading.value = true;
       try {
-        const res = await fetch('/api/v1/admin/metrics', {
-          headers: { Authorization: authHeader.value }
-        });
+        const res = await fetch('/api/v1/admin/metrics', { credentials: 'same-origin' });
+        if (res.status === 401) { isLoggedIn.value = false; return; }
         if (res.ok) {
           metrics.value = await res.json();
           lastUpdated.value = new Date().toLocaleTimeString('vi-VN');
@@ -966,9 +983,8 @@ createApp({
 
     async function fetchRegistry() {
       try {
-        const res = await fetch('/api/v1/face/list', {
-          headers: { Authorization: authHeader.value }
-        });
+        const res = await fetch('/api/v1/admin/faces', { credentials: 'same-origin' });
+        if (res.status === 401) { isLoggedIn.value = false; return; }
         if (res.ok) {
           const data = await res.json();
           registry.value = Array.isArray(data) ? data : (data.employees ?? data.data ?? []);
@@ -980,9 +996,9 @@ createApp({
       if (!confirm(`Bạn có chắc chắn muốn xóa nhân viên "${userId}" không?`)) return;
       deleteLoading.value = userId;
       try {
-        const res = await fetch(`/api/v1/face/register/${userId}`, {
+        const res = await fetch(`/api/v1/admin/faces/${encodeURIComponent(userId)}`, {
           method: 'DELETE',
-          headers: { Authorization: authHeader.value }
+          credentials: 'same-origin'
         });
         if (res.ok) {
           registry.value = registry.value.filter(e => e.user_id !== userId);
@@ -1030,7 +1046,7 @@ createApp({
       try {
         const res = await fetch('/api/v1/face/detect', {
           method: 'POST',
-          headers: { Authorization: authHeader.value },
+          credentials: 'same-origin',
           body: fd
         });
         if (res.ok) {
@@ -1055,8 +1071,12 @@ createApp({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       regDetectBoxes.forEach(face => {
         const bbox = face.bbox ?? face.box ?? face;
-        if (!bbox || bbox.length < 4) return;
-        const [x1, y1, x2, y2] = bbox;
+        if (!bbox) return;
+        // API returns object-shaped bbox {x1, y1, x2, y2}; support arrays too.
+        const [x1, y1, x2, y2] = Array.isArray(bbox)
+          ? bbox
+          : [bbox.x1, bbox.y1, bbox.x2, bbox.y2];
+        if ([x1, y1, x2, y2].some(v => typeof v !== 'number')) return;
         ctx.strokeStyle = '#6366f1';
         ctx.lineWidth = Math.max(2, canvas.width / 200);
         ctx.shadowColor = '#6366f1';
@@ -1084,9 +1104,9 @@ createApp({
       fd.append('user_id', regForm.value.userId);
       fd.append('file', regForm.value.file);
       try {
-        const res = await fetch('/api/v1/face/register', {
+        const res = await fetch('/api/v1/admin/faces', {
           method: 'POST',
-          headers: { Authorization: authHeader.value },
+          credentials: 'same-origin',
           body: fd
         });
         const data = await res.json();
@@ -1129,7 +1149,7 @@ createApp({
       try {
         const res = await fetch('/api/v1/face/verify-employee', {
           method: 'POST',
-          headers: { Authorization: authHeader.value },
+          credentials: 'same-origin',
           body: fd
         });
         const data = await res.json();

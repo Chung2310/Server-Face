@@ -22,6 +22,8 @@ async def lifespan(app: FastAPI):
         FaceAnalysisService()
     except Exception as e:
         logger.error(f"Critical error on startup loading models: {e}")
+    from app.database import initialize_database
+    await initialize_database()
     yield
 
 # Setup FastAPI App

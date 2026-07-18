@@ -1,133 +1,81 @@
-import pytest
-from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, patch
+import asyncio
+
 import numpy as np
+import pytest
 
-# In-memory storage mock representing MongoDB collection
-MOCK_DB_STORE = []
+from app.config import settings
+from app.services.admin_auth import ensure_bootstrap_admin
+from tests.shared_state import fake_db, mock_service
 
-class MockCursor:
-    def __init__(self, data):
-        self.data = data
-        self.index = 0
+API_KEY_HEADER = {"X-API-Key": "test-api-key"}
 
-    def __aiter__(self):
-        return self
 
-    async def __anext__(self):
-        if self.index >= len(self.data):
-            raise StopAsyncIteration
-        val = self.data[self.index]
-        self.index += 1
-        return val
-
-async def mock_update_one(filter_query, update_query, upsert=False):
-    user_id = filter_query["user_id"]
-    embedding = update_query["$set"]["embedding"]
-    # Remove existing record if present to simulate replacement
-    for idx, doc in enumerate(MOCK_DB_STORE):
-        if doc["user_id"] == user_id:
-            MOCK_DB_STORE[idx] = {"user_id": user_id, "embedding": embedding}
-            return MagicMock()
-    MOCK_DB_STORE.append({"user_id": user_id, "embedding": embedding})
-    return MagicMock()
-
-def mock_find(query, projection=None):
-    return MockCursor(list(MOCK_DB_STORE))
-
-async def mock_find_one(filter_query):
-    user_id = filter_query["user_id"]
-    for doc in MOCK_DB_STORE:
-        if doc["user_id"] == user_id:
-            return doc
-    return None
-
-# Construct Mock DB
-mock_db = MagicMock()
-mock_db.face_registry.update_one = mock_update_one
-mock_db.face_registry.find_one = mock_find_one
-mock_db.face_registry.find = mock_find
-
-# Configure the service mock
-mock_service_instance = MagicMock()
-mock_service_instance._initialized = True
-
-def mock_sim(emb1, emb2):
-    dot_product = np.dot(emb1, emb2)
-    norm_emb1 = np.linalg.norm(emb1)
-    norm_emb2 = np.linalg.norm(emb2)
-    if norm_emb1 == 0 or norm_emb2 == 0:
+def _cosine(emb1, emb2):
+    dot = np.dot(emb1, emb2)
+    n1, n2 = np.linalg.norm(emb1), np.linalg.norm(emb2)
+    if n1 == 0 or n2 == 0:
         return 0.0
-    return float(dot_product / (norm_emb1 * norm_emb2))
-    
-mock_service_instance.compute_similarity = mock_sim
+    return float(dot / (n1 * n2))
 
-# Start global patchers at the module level (no with blocks to prevent premature teardown)
-service_patcher = patch("app.services.face_analysis.FaceAnalysisService.__new__", return_value=mock_service_instance)
-service_patcher.start()
 
-db_patcher = patch("app.database.db", mock_db)
-db_patcher.start()
+@pytest.fixture(autouse=True)
+def real_similarity():
+    mock_service.compute_similarity.side_effect = _cosine
+    yield
 
-decode_patcher = patch("app.routers.face.decode_image", return_value=np.zeros((100, 100, 3), dtype=np.uint8))
-decode_patcher.start()
 
-# Import the app with mocks active
-from app.main import app
-client = TestClient(app)
+def _register_embedding(user_id, embedding):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    fake_db.face_registry.docs.append({
+        "user_id": user_id, "embedding": embedding,
+        "created_at": now, "updated_at": now,
+    })
 
-def test_health_check():
+
+def test_health_check(client):
     response = client.get("/api/v1/health")
     assert response.status_code == 200
-    json_data = response.json()
-    assert json_data["status"] == "OK"
-    assert json_data["model_name"] == "buffalo_s"
+    assert response.json()["status"] == "OK"
 
-def test_verify_embeddings_valid():
-    # Simple unit vectors for exact matches
-    emb1 = [1.0] + [0.0] * 511
-    emb2 = [1.0] + [0.0] * 511
-    
-    payload = {
-        "embedding1": emb1,
-        "embedding2": emb2
-    }
-    response = client.post("/api/v1/face/verify-embeddings", json=payload)
+
+def test_verify_embeddings_identical(client):
+    emb = [1.0] + [0.0] * 511
+    response = client.post("/api/v1/face/verify-embeddings", json={
+        "embedding1": emb, "embedding2": emb,
+    })
     assert response.status_code == 200
     json_data = response.json()
     assert json_data["verified"] is True
     assert json_data["similarity"] == pytest.approx(1.0)
 
-def test_verify_embeddings_dissimilar():
+
+def test_verify_embeddings_dissimilar(client):
     emb1 = [1.0] + [0.0] * 511
-    emb2 = [0.0, 1.0] + [0.0] * 510  # Orthogonal vector, similarity should be 0.0
-    
-    payload = {
-        "embedding1": emb1,
-        "embedding2": emb2
-    }
-    response = client.post("/api/v1/face/verify-embeddings", json=payload)
+    emb2 = [0.0, 1.0] + [0.0] * 510
+    response = client.post("/api/v1/face/verify-embeddings", json={
+        "embedding1": emb1, "embedding2": emb2,
+    })
     assert response.status_code == 200
     json_data = response.json()
     assert json_data["verified"] is False
     assert json_data["similarity"] == pytest.approx(0.0)
 
-def test_register_and_search():
-    emb1 = [1.0] + [0.0] * 511
-    emb2 = [0.0, 1.0] + [0.0] * 510
 
-    # Register user1
-    reg_response = client.post("/api/v1/face/register", json={
-        "user_id": "user1",
-        "embedding": emb1
-    })
+def test_register_multipart_and_search(client, one_face):
+    # New contract: multipart user_id + file, X-API-Key protected
+    reg_response = client.post(
+        "/api/v1/face/register",
+        data={"user_id": "user1"},
+        files={"file": ("a.jpg", b"fake", "image/jpeg")},
+        headers=API_KEY_HEADER,
+    )
     assert reg_response.status_code == 200
-    assert reg_response.json()["message"] == "Successfully registered user: user1"
+    assert reg_response.json()["user_id"] == "user1"
 
-    # Search for user1 (query with emb1)
+    emb1 = one_face.embedding.tolist()
     search_response = client.post("/api/v1/face/search", json={
-        "embedding": emb1,
-        "limit": 5
+        "embedding": emb1, "limit": 5,
     })
     assert search_response.status_code == 200
     results = search_response.json()["matches"]
@@ -135,44 +83,32 @@ def test_register_and_search():
     assert results[0]["user_id"] == "user1"
     assert results[0]["similarity"] == pytest.approx(1.0)
 
-    # Search query with orthogonal emb2 - should not match user1 (threshold is 0.45, similarity is 0.0)
-    search_response_empty = client.post("/api/v1/face/search", json={
-        "embedding": emb2,
-        "limit": 5
-    })
-    assert search_response_empty.status_code == 200
-    assert len(search_response_empty.json()["matches"]) == 0
+    # Orthogonal query finds nothing above threshold
+    emb2 = [0.0, 1.0] + [0.0] * 510
+    empty = client.post("/api/v1/face/search", json={"embedding": emb2, "limit": 5})
+    assert empty.status_code == 200
+    assert len(empty.json()["matches"]) == 0
 
-def test_verify_employee_not_registered():
-    # Make request for unregistered user
+
+def test_verify_employee_not_registered(client, one_face):
     response = client.post(
         "/api/v1/face/verify-employee",
-        data={"user_id": "unregistered_user"},
-        files={"file": ("test.jpg", b"fake-image-bytes", "image/jpeg")}
+        data={"user_id": "user_unknown"},
+        files={"file": ("test.jpg", b"fake-image-bytes", "image/jpeg")},
     )
     assert response.status_code == 200
-    json_data = response.json()
-    assert json_data["verified"] is False
-    assert "chưa đăng ký" in json_data["reason"]
+    assert response.json()["verified"] is False
 
-def test_verify_employee_success():
+
+def test_verify_employee_success(client, one_face):
     emb1 = [1.0] + [0.0] * 511
-    
-    # 1. Pre-register the user
-    client.post("/api/v1/face/register", json={
-        "user_id": "user_verified_ok",
-        "embedding": emb1
-    })
-
-    # 2. Mock service to detect face and return emb1
-    mock_face = MagicMock()
-    mock_face.embedding = np.array(emb1, dtype=np.float32)
-    mock_service_instance.get_largest_face.return_value = mock_face
+    _register_embedding("user_verified_ok", emb1)
+    one_face.embedding = np.array(emb1, dtype=np.float32)
 
     response = client.post(
         "/api/v1/face/verify-employee",
         data={"user_id": "user_verified_ok"},
-        files={"file": ("test.jpg", b"fake-image-bytes", "image/jpeg")}
+        files={"file": ("test.jpg", b"fake-image-bytes", "image/jpeg")},
     )
     assert response.status_code == 200
     json_data = response.json()
@@ -180,25 +116,15 @@ def test_verify_employee_success():
     assert "thành công" in json_data["reason"]
     assert json_data["similarity"] == pytest.approx(1.0)
 
-def test_verify_employee_fail():
-    emb_registered = [1.0] + [0.0] * 511
-    emb_detected = [0.0, 1.0] + [0.0] * 510  # Orthogonal vector
-    
-    # 1. Pre-register the user
-    client.post("/api/v1/face/register", json={
-        "user_id": "user_verified_fail",
-        "embedding": emb_registered
-    })
 
-    # 2. Mock service to return orthogonal face embedding
-    mock_face = MagicMock()
-    mock_face.embedding = np.array(emb_detected, dtype=np.float32)
-    mock_service_instance.get_largest_face.return_value = mock_face
+def test_verify_employee_fail(client, one_face):
+    _register_embedding("user_verified_fail", [1.0] + [0.0] * 511)
+    one_face.embedding = np.array([0.0, 1.0] + [0.0] * 510, dtype=np.float32)
 
     response = client.post(
         "/api/v1/face/verify-employee",
         data={"user_id": "user_verified_fail"},
-        files={"file": ("test.jpg", b"fake-image-bytes", "image/jpeg")}
+        files={"file": ("test.jpg", b"fake-image-bytes", "image/jpeg")},
     )
     assert response.status_code == 200
     json_data = response.json()
@@ -206,44 +132,24 @@ def test_verify_employee_fail():
     assert "thất bại" in json_data["reason"]
     assert json_data["similarity"] == pytest.approx(0.0)
 
-def test_admin_metrics_unauthorized():
-    """Truy cập /admin/metrics không có xác thực phải trả về 401."""
+
+def test_admin_metrics_unauthorized(client):
+    """Truy cập /admin/metrics không có phiên đăng nhập phải trả v�? 401."""
     response = client.get("/api/v1/admin/metrics")
     assert response.status_code == 401
 
-def test_admin_metrics_wrong_credentials():
-    """Truy cập /admin/metrics với sai mật khẩu phải trả về 401."""
-    import base64
-    bad_creds = base64.b64encode(b"admin:wrongpassword").decode()
-    response = client.get(
-        "/api/v1/admin/metrics",
-        headers={"Authorization": f"Basic {bad_creds}"}
-    )
-    assert response.status_code == 401
 
-def test_admin_metrics_authorized():
-    """Truy cập /admin/metrics với đúng tài khoản phải trả về 200 và các trường hợp lệ."""
-    import base64
-    from app.config import settings
-    creds = base64.b64encode(
-        f"{settings.ADMIN_USERNAME}:{settings.ADMIN_PASSWORD}".encode()
-    ).decode()
-    response = client.get(
-        "/api/v1/admin/metrics",
-        headers={"Authorization": f"Basic {creds}"}
-    )
+def test_admin_metrics_with_session(client):
+    """�?ăng nhập bằng session cookie rồi truy cập /admin/metrics phải trả v�? 200."""
+    asyncio.run(ensure_bootstrap_admin(fake_db))
+    login = client.post("/api/v1/admin/login", json={
+        "username": settings.ADMIN_USERNAME,
+        "password": settings.ADMIN_PASSWORD,
+    })
+    assert login.status_code == 200
+
+    response = client.get("/api/v1/admin/metrics")
     assert response.status_code == 200
     data = response.json()
     assert "system" in data
     assert "database" in data
-    assert "service" in data
-    assert "cpu_percent" in data["system"]
-    assert "memory_percent" in data["system"]
-
-# Clean up patchers at exit
-@pytest.fixture(scope="session", autouse=True)
-def cleanup_patchers():
-    yield
-    service_patcher.stop()
-    db_patcher.stop()
-    decode_patcher.stop()

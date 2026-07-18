@@ -1,15 +1,18 @@
 import requests
 import json
+import os
 import sys
 import io
 
-# Force stdout to use UTF-8 to prevent cp1252 rendering errors on Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-
 BASE_URL = "http://127.0.0.1:8000/api/v1"
 IMAGE_URL = "https://raw.githubusercontent.com/opencv/opencv/master/samples/data/lena.jpg"
+FACE_API_KEY = os.environ.get("FACE_API_KEY", "")
 
 def main():
+    # Force stdout to use UTF-8 to prevent cp1252 rendering errors on Windows.
+    # Kept inside main() so pytest collection does not break capture.
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
     print("=== STARTING INTEGRATION TEST ===")
     
     # 1. Download sample face image
@@ -51,15 +54,24 @@ def main():
         print(f"Error: {emb_res.text}")
         return
 
-    # 4. Test Register endpoint
+    # 4. Test Register endpoint (multipart image upload, X-API-Key protected)
     print("\nTesting `/face/register` endpoint...")
-    register_payload = {
-        "user_id": "lena_test_user",
-        "embedding": embedding
-    }
-    reg_res = requests.post(f"{BASE_URL}/face/register", json=register_payload)
+    files = {"file": ("lena.jpg", image_bytes, "image/jpeg")}
+    reg_res = requests.post(
+        f"{BASE_URL}/face/register",
+        data={"user_id": "lena_test_user"},
+        files=files,
+        headers={"X-API-Key": FACE_API_KEY},
+    )
     print(f"Status Code: {reg_res.status_code}")
     print(f"Response: {reg_res.json()}")
+
+    # 4b. Registration status lookup
+    status_res = requests.get(
+        f"{BASE_URL}/face/register/lena_test_user",
+        headers={"X-API-Key": FACE_API_KEY},
+    )
+    print(f"Status lookup: {status_res.status_code} {status_res.json() if status_res.ok else status_res.text}")
 
     # 5. Test Search endpoint
     print("\nTesting `/face/search` endpoint...")

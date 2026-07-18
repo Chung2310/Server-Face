@@ -1,18 +1,21 @@
 import cv2
 import numpy as np
 from typing import List
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from app.services.face_analysis import FaceAnalysisService
 from app.schemas.face import (
     FaceDetectionResponse, BoundingBox, FaceLandmark,
     FaceEmbeddingResponse, VerifyEmbeddingsRequest, VerifyResponse,
-    SearchRegisterRequest, SearchQueryRequest, SearchResponse, SearchMatch,
-    VerifyEmployeeResponse
+    SearchQueryRequest, SearchResponse, SearchMatch,
+    VerifyEmployeeResponse, RegisterFaceResponse,
+    RegistrationStatusResponse, DeleteRegistrationResponse,
+    FaceRegistrationInfo,
 )
 from app.config import settings
+from app.dependencies import require_face_api_key
 
-from datetime import datetime
-from app.database import db
+from datetime import datetime, timezone
+from app.database import db, require_database
 
 router = APIRouter(prefix="/face", tags=["Face Operations"])
 service = FaceAnalysisService()
@@ -152,31 +155,95 @@ async def verify_embeddings(
         threshold=active_threshold
     )
 
-@router.post("/register", response_model=dict)
-async def register_face(request: SearchRegisterRequest):
-    """
-    Registers a user ID and their corresponding face embedding in MongoDB.
-    """
-    emb = np.array(request.embedding, dtype=np.float32)
-    if emb.shape != (512,):
-        raise HTTPException(status_code=400, detail="Embedding must be a 512-dimensional vector")
-        
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database connection not available")
+# ── Shared registry operations (used by API-key and admin session routes) ──
 
-    # Upsert the face embedding in MongoDB face_registry collection
-    await db.face_registry.update_one(
-        {"user_id": request.user_id},
+async def register_face_from_image(user_id: str, contents: bytes) -> RegisterFaceResponse:
+    """Detect exactly one face in the image and upsert its embedding.
+
+    Preserves created_at on re-registration via $setOnInsert.
+    """
+    database = require_database()
+    img = decode_image(contents)
+    faces = service.detect_faces(img)
+    if not faces:
+        raise HTTPException(status_code=400, detail="No face detected in the image")
+    if len(faces) > 1:
+        raise HTTPException(status_code=400, detail="Multiple faces detected; exactly one face is required")
+
+    now = datetime.now(timezone.utc)
+    result = await database.face_registry.update_one(
+        {"user_id": user_id},
         {
-            "$set": {
-                "user_id": request.user_id,
-                "embedding": request.embedding,
-                "updated_at": datetime.utcnow()
-            }
+            "$set": {"embedding": faces[0].embedding.tolist(), "updated_at": now},
+            "$setOnInsert": {"user_id": user_id, "created_at": now},
         },
-        upsert=True
+        upsert=True,
     )
-    return {"message": f"Successfully registered user: {request.user_id}"}
+    doc = await database.face_registry.find_one({"user_id": user_id})
+    return RegisterFaceResponse(
+        user_id=user_id,
+        created=getattr(result, "upserted_id", None) is not None,
+        created_at=doc["created_at"],
+        updated_at=doc["updated_at"],
+    )
+
+async def get_registration_status(user_id: str) -> RegistrationStatusResponse:
+    database = require_database()
+    doc = await database.face_registry.find_one({"user_id": user_id})
+    if doc is None:
+        return RegistrationStatusResponse(user_id=user_id, registered=False)
+    return RegistrationStatusResponse(
+        user_id=user_id,
+        registered=True,
+        created_at=doc.get("created_at"),
+        updated_at=doc.get("updated_at"),
+    )
+
+async def delete_registration(user_id: str) -> DeleteRegistrationResponse:
+    database = require_database()
+    result = await database.face_registry.delete_one({"user_id": user_id})
+    return DeleteRegistrationResponse(user_id=user_id, deleted=result.deleted_count > 0)
+
+async def list_registrations() -> List[FaceRegistrationInfo]:
+    database = require_database()
+    items: List[FaceRegistrationInfo] = []
+    cursor = database.face_registry.find({}, {"user_id": 1, "created_at": 1, "updated_at": 1})
+    async for doc in cursor:
+        items.append(FaceRegistrationInfo(
+            user_id=doc["user_id"],
+            created_at=doc.get("created_at"),
+            updated_at=doc.get("updated_at"),
+        ))
+    items.sort(key=lambda x: x.user_id)
+    return items
+
+# ── API-key protected registry endpoints ──
+
+@router.post("/register", response_model=RegisterFaceResponse, dependencies=[Depends(require_face_api_key)])
+async def register_face(
+    user_id: str = Form(..., description="Unique employee identifier"),
+    file: UploadFile = File(..., description="Image containing exactly one face"),
+):
+    """
+    Registers (or re-registers) a user's face from an uploaded image.
+    Requires the X-API-Key header. Embeddings are never returned.
+    """
+    contents = await file.read()
+    return await register_face_from_image(user_id, contents)
+
+@router.get("/register/{user_id}", response_model=RegistrationStatusResponse, dependencies=[Depends(require_face_api_key)])
+async def registration_status(user_id: str):
+    """
+    Returns whether the user has a registered face (metadata only, no embedding).
+    """
+    return await get_registration_status(user_id)
+
+@router.delete("/register/{user_id}", response_model=DeleteRegistrationResponse, dependencies=[Depends(require_face_api_key)])
+async def remove_registration(user_id: str):
+    """
+    Deletes the user's face registration. Returns deleted=false when absent.
+    """
+    return await delete_registration(user_id)
 
 @router.post("/search", response_model=SearchResponse)
 async def search_face(

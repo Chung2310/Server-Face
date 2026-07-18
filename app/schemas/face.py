@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
@@ -45,6 +46,35 @@ class SearchMatch(BaseModel):
 
 class SearchResponse(BaseModel):
     matches: List[SearchMatch]
+
+class AdminLoginRequest(BaseModel):
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+class AdminMeResponse(BaseModel):
+    username: str
+
+class FaceRegistrationInfo(BaseModel):
+    user_id: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class RegisterFaceResponse(BaseModel):
+    user_id: str
+    registered: bool = True
+    created: bool = Field(..., description="True if this was a new registration")
+    created_at: datetime
+    updated_at: datetime
+
+class RegistrationStatusResponse(BaseModel):
+    user_id: str
+    registered: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class DeleteRegistrationResponse(BaseModel):
+    user_id: str
+    deleted: bool
 
 class VerifyEmployeeResponse(BaseModel):
     verified: bool = Field(..., description="True if verification succeeds")

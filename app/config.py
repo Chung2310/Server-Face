@@ -26,9 +26,19 @@ class Settings(BaseSettings):
     MONGODB_PASSWORD: Optional[str] = None
     MONGODB_AUTH_SOURCE: str = "admin"
 
-    # Admin Panel credentials
+    MONGODB_SERVER_SELECTION_TIMEOUT_MS: int = 3000
+
+    # Admin Panel credentials (bootstrap admin)
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin123"
+
+    # Admin session cookie
+    ADMIN_SESSION_TTL_SECONDS: int = 86400
+    ADMIN_COOKIE_SECURE: bool = False
+    ADMIN_SESSION_COOKIE: str = "admin_session"
+
+    # Integration API key for face registry management (X-API-Key)
+    FACE_API_KEY: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

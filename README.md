@@ -57,5 +57,42 @@ docker run -p 8000:8000 insightface-service
 - `POST /api/v1/face/embedding`: Returns 512-dimensional floats. Optionally filtered for the largest face.
 - `POST /api/v1/face/verify-images`: Compares largest faces in two uploaded images.
 - `POST /api/v1/face/verify-embeddings`: Checks similarity of two pre-extracted vectors.
-- `POST /api/v1/face/register`: Registers a user ID with their embedding.
 - `POST /api/v1/face/search`: Compares target embedding against registered users.
+
+### Face Registry (integration API, requires `X-API-Key`)
+
+These endpoints are protected by the `FACE_API_KEY` environment variable, sent as the `X-API-Key` header. Embeddings are never returned.
+
+```bash
+# Register (or re-register) a face from an image containing exactly one face
+curl -X POST http://localhost:8000/api/v1/face/register \
+  -H "X-API-Key: $FACE_API_KEY" \
+  -F "user_id=emp001" -F "file=@photo.jpg"
+
+# Check registration status (200 for both registered and unregistered)
+curl http://localhost:8000/api/v1/face/register/emp001 -H "X-API-Key: $FACE_API_KEY"
+
+# Delete a registration (returns deleted: true/false)
+curl -X DELETE http://localhost:8000/api/v1/face/register/emp001 -H "X-API-Key: $FACE_API_KEY"
+```
+
+### Admin (session cookie)
+
+Admin login uses an HttpOnly session cookie backed by MongoDB. The bootstrap admin is created at startup from `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
+
+```bash
+# Login — stores the HttpOnly session cookie in cookies.txt
+curl -c cookies.txt -X POST http://localhost:8000/api/v1/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "..."}'
+
+# Authenticated requests use the cookie
+curl -b cookies.txt http://localhost:8000/api/v1/admin/me
+curl -b cookies.txt http://localhost:8000/api/v1/admin/metrics
+curl -b cookies.txt http://localhost:8000/api/v1/admin/faces
+
+# Logout
+curl -b cookies.txt -X POST http://localhost:8000/api/v1/admin/logout
+```
+
+Admin endpoints: `POST /admin/login`, `POST /admin/logout`, `GET /admin/me`, `GET /admin/metrics`, and session-protected registry management under `/admin/faces` (list/create/status/delete).
