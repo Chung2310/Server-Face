@@ -1,6 +1,7 @@
 services:
   igen-insightface:
-    image: ghcr.io/chung2310/server-face:${IMAGE_TAG:-latest}
+    build: .
+    image: ghcr.io/chung2310/server-face:${IMAGE_TAG:-develop}
     container_name: ${CONTAINER_NAME:-igen-insightface}
     restart: always
     ports:
@@ -9,7 +10,7 @@ services:
       - .env
     volumes:
       - .env:/app/.env
-      - ${MODEL_DIR:-/opt/igen-insightface/models}:/root/.insightface
+      - ${MODEL_DIR:-~/.insightface}:/root/.insightface
     networks:
       - default_network
     extra_hosts:
