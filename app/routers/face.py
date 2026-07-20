@@ -1,7 +1,10 @@
 import cv2
+import logging
 import numpy as np
 from typing import List
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
+
+logger = logging.getLogger("uvicorn.error")
 from app.services.face_analysis import FaceAnalysisService
 from app.services.liveness import LivenessService, LivenessUnavailableError
 from app.schemas.face import (
@@ -65,8 +68,10 @@ async def detect_faces(file: UploadFile = File(...)):
     Detects all faces in the uploaded image, returning their bounding boxes, landmarks, gender, and age.
     """
     contents = await file.read()
+    logger.info(f"Detecting faces in uploaded file: {file.filename} ({len(contents)} bytes)")
     img = decode_image(contents)
     faces = service.detect_faces(img)
+    logger.info(f"Detected {len(faces)} face(s) in {file.filename}")
     return [format_detection_response(face) for face in faces]
 
 @router.post("/embedding", response_model=List[FaceEmbeddingResponse])
@@ -78,10 +83,12 @@ async def extract_embeddings(
     Extracts the 512-dimensional face embedding for face(s) in the uploaded image.
     """
     contents = await file.read()
+    logger.info(f"Extracting embedding from file: {file.filename} ({len(contents)} bytes), largest_only={largest_only}")
     img = decode_image(contents)
     faces = service.detect_faces(img)
     
     if not faces:
+        logger.warning(f"Embedding extraction failed: No faces detected in {file.filename}")
         raise HTTPException(status_code=404, detail="No faces detected in the image")
         
     if largest_only:
@@ -172,23 +179,29 @@ async def register_face_from_image(user_id: str, contents: bytes) -> RegisterFac
 
     Preserves created_at on re-registration via $setOnInsert.
     """
+    logger.info(f"Start face registration from image for user_id: {user_id} ({len(contents)} bytes)")
     database = require_database()
     try:
         img = decode_image(contents)
     except HTTPException as exc:
+        logger.warning(f"Registration failed for user_id: {user_id} - invalid_image")
         raise reason_error(400, "invalid_image") from exc
     faces = service.detect_faces(img)
     if not faces:
+        logger.warning(f"Registration failed for user_id: {user_id} - no_face")
         raise reason_error(400, "no_face")
     if len(faces) > 1:
+        logger.warning(f"Registration failed for user_id: {user_id} - multiple_faces ({len(faces)} detected)")
         raise reason_error(400, "multiple_faces")
 
     face = faces[0]
     try:
         liveness = get_liveness_service().analyze(img, face.bbox)
     except LivenessUnavailableError as exc:
+        logger.error(f"Registration failed for user_id: {user_id} - liveness model_unavailable")
         raise reason_error(503, "model_unavailable") from exc
     if not liveness.live:
+        logger.warning(f"Registration failed for user_id: {user_id} - spoof_detected (score: {liveness.score:.4f}, threshold: {liveness.threshold})")
         raise reason_error(400, "spoof_detected")
 
     now = datetime.now(timezone.utc)
@@ -201,9 +214,11 @@ async def register_face_from_image(user_id: str, contents: bytes) -> RegisterFac
         upsert=True,
     )
     doc = await database.face_registry.find_one({"user_id": user_id})
+    created = getattr(result, "upserted_id", None) is not None
+    logger.info(f"Successfully registered face for user_id: {user_id} | Created: {created}")
     return RegisterFaceResponse(
         user_id=user_id,
-        created=getattr(result, "upserted_id", None) is not None,
+        created=created,
         created_at=doc["created_at"],
         updated_at=doc["updated_at"],
     )

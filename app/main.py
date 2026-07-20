@@ -51,6 +51,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import time
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+    logger.info(
+        f"Request: {request.method} {request.url.path} | "
+        f"Status: {response.status_code} | Duration: {duration:.4f}s"
+    )
+    return response
+
 # Custom Validation Error Handler
 # Fixes UnicodeDecodeError when FastAPI tries to encode binary file bytes in validation errors
 @app.exception_handler(RequestValidationError)
