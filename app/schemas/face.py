@@ -80,4 +80,12 @@ class VerifyEmployeeResponse(BaseModel):
     verified: bool = Field(..., description="True if verification succeeds")
     reason: str = Field(..., description="Vietnamese explanation of the verification result")
     similarity: Optional[float] = Field(None, description="Similarity score between the faces")
-
+class SecureVerifyEmployeeResponse(BaseModel):
+    registered: bool
+    face_verified: bool
+    similarity: Optional[float] = None
+    face_threshold: float
+    live: bool
+    liveness_score: Optional[float] = None
+    liveness_threshold: float
+    reason_code: str

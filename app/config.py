@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     # Face recognition matching threshold (cosine similarity)
     # Typically 0.40 - 0.50 is a good threshold for buffalo_l
     SIMILARITY_THRESHOLD: float = 0.45
+
+    # Passive liveness model is provisioned by deployment; it is never downloaded.
+    LIVENESS_MODEL_PATH: str = ""
+    LIVENESS_THRESHOLD: float = 0.80
+    LIVENESS_INPUT_SIZE: Tuple[int, int] = (80, 80)
+    LIVENESS_LIVE_CLASS_INDEX: int = 1
     
     # Server configuration
     PORT: int = 8000

@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from app.services.face_analysis import FaceAnalysisService
+from app.services.liveness import LivenessService
 from app.config import settings
 
 router = APIRouter()
@@ -15,9 +16,15 @@ async def health_check():
     except Exception:
         model_loaded = False
         
+    try:
+        liveness_ready = bool(LivenessService()._initialized)
+    except Exception:
+        liveness_ready = False
+
     return {
         "status": "OK" if model_loaded else "ERROR",
         "model_name": settings.MODEL_NAME,
         "model_loaded": model_loaded,
+        "liveness_ready": liveness_ready,
         "app_name": settings.APP_NAME
     }

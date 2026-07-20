@@ -99,7 +99,7 @@ def test_no_face_image_rejected(client):
     with patch("app.routers.face.decode_image", return_value=np.zeros((10, 10, 3), dtype=np.uint8)):
         res = _register(client)
     assert res.status_code == 400
-    assert "No face" in res.json()["detail"]
+    assert res.json()["detail"] == {"reason_code": "no_face"}
 
 
 def test_multi_face_image_rejected(client):
@@ -109,4 +109,4 @@ def test_multi_face_image_rejected(client):
     with patch("app.routers.face.decode_image", return_value=np.zeros((10, 10, 3), dtype=np.uint8)):
         res = _register(client)
     assert res.status_code == 400
-    assert "Multiple faces" in res.json()["detail"]
+    assert res.json()["detail"] == {"reason_code": "multiple_faces"}

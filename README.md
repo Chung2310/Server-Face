@@ -50,7 +50,7 @@ docker run -p 8000:8000 insightface-service
 ## API Endpoints
 
 ### System
-- `GET /api/v1/health`: Checks status of API and model initialization.
+- `GET /api/v1/health`: Checks face-model status and exposes `liveness_ready` without model paths or secrets.
 
 ### Face Operations
 - `POST /api/v1/face/detect`: Decodes uploaded image and returns metadata of all faces found.
@@ -63,6 +63,7 @@ docker run -p 8000:8000 insightface-service
 
 These endpoints are protected by the `FACE_API_KEY` environment variable, sent as the `X-API-Key` header. Embeddings are never returned.
 
+Passive liveness is CPU-only and fail-closed. Provision the ONNX artifact at deployment and set `LIVENESS_MODEL_PATH`, `LIVENESS_THRESHOLD`, `LIVENESS_INPUT_SIZE`, and `LIVENESS_LIVE_CLASS_INDEX`; the service never downloads a model. Enrollment and secure verification require exactly one live face. Stable reason codes include `not_registered`, `invalid_image`, `no_face`, `multiple_faces`, `model_unavailable`, `spoof_detected`, `face_mismatch`, and `verified`.
 ```bash
 # Register (or re-register) a face from an image containing exactly one face
 curl -X POST http://localhost:8000/api/v1/face/register \
@@ -74,6 +75,11 @@ curl http://localhost:8000/api/v1/face/register/emp001 -H "X-API-Key: $FACE_API_
 
 # Delete a registration (returns deleted: true/false)
 curl -X DELETE http://localhost:8000/api/v1/face/register/emp001 -H "X-API-Key: $FACE_API_KEY"
+
+# Verify registration, passive liveness, and face match with server-owned thresholds
+curl -X POST http://localhost:8000/api/v1/face/verify-employee-secure \
+  -H "X-API-Key: $FACE_API_KEY" \
+  -F "user_id=emp001" -F "file=@capture.jpg"
 ```
 
 ### Admin (session cookie)
@@ -96,3 +102,12 @@ curl -b cookies.txt -X POST http://localhost:8000/api/v1/admin/logout
 ```
 
 Admin endpoints: `POST /admin/login`, `POST /admin/logout`, `GET /admin/me`, `GET /admin/metrics`, and session-protected registry management under `/admin/faces` (list/create/status/delete).
+## Liveness benchmark
+
+Run the read-only CPU benchmark against a local directory of images:
+
+```bash
+python scripts/benchmark_liveness.py ./benchmark-images
+```
+
+The JSON report contains successful sample count, p50/p95 inference latency, live/spoof counts, and errors. Images are read locally and are neither uploaded nor persisted by the script.

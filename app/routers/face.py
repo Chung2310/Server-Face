@@ -3,13 +3,14 @@ import numpy as np
 from typing import List
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from app.services.face_analysis import FaceAnalysisService
+from app.services.liveness import LivenessService, LivenessUnavailableError
 from app.schemas.face import (
     FaceDetectionResponse, BoundingBox, FaceLandmark,
     FaceEmbeddingResponse, VerifyEmbeddingsRequest, VerifyResponse,
     SearchQueryRequest, SearchResponse, SearchMatch,
     VerifyEmployeeResponse, RegisterFaceResponse,
     RegistrationStatusResponse, DeleteRegistrationResponse,
-    FaceRegistrationInfo,
+    FaceRegistrationInfo, SecureVerifyEmployeeResponse,
 )
 from app.config import settings
 from app.dependencies import require_face_api_key
@@ -19,6 +20,15 @@ from app.database import db, require_database
 
 router = APIRouter(prefix="/face", tags=["Face Operations"])
 service = FaceAnalysisService()
+
+
+def get_liveness_service() -> LivenessService:
+    """Construct lazily so an unprovisioned model fails per request, not at import."""
+    return LivenessService()
+
+
+def reason_error(status_code: int, reason_code: str) -> HTTPException:
+    return HTTPException(status_code=status_code, detail={"reason_code": reason_code})
 
 def decode_image(file_bytes: bytes) -> np.ndarray:
     nparr = np.frombuffer(file_bytes, np.uint8)
@@ -163,18 +173,29 @@ async def register_face_from_image(user_id: str, contents: bytes) -> RegisterFac
     Preserves created_at on re-registration via $setOnInsert.
     """
     database = require_database()
-    img = decode_image(contents)
+    try:
+        img = decode_image(contents)
+    except HTTPException as exc:
+        raise reason_error(400, "invalid_image") from exc
     faces = service.detect_faces(img)
     if not faces:
-        raise HTTPException(status_code=400, detail="No face detected in the image")
+        raise reason_error(400, "no_face")
     if len(faces) > 1:
-        raise HTTPException(status_code=400, detail="Multiple faces detected; exactly one face is required")
+        raise reason_error(400, "multiple_faces")
+
+    face = faces[0]
+    try:
+        liveness = get_liveness_service().analyze(img, face.bbox)
+    except LivenessUnavailableError as exc:
+        raise reason_error(503, "model_unavailable") from exc
+    if not liveness.live:
+        raise reason_error(400, "spoof_detected")
 
     now = datetime.now(timezone.utc)
     result = await database.face_registry.update_one(
         {"user_id": user_id},
         {
-            "$set": {"embedding": faces[0].embedding.tolist(), "updated_at": now},
+            "$set": {"embedding": face.embedding.tolist(), "updated_at": now},
             "$setOnInsert": {"user_id": user_id, "created_at": now},
         },
         upsert=True,
@@ -334,4 +355,70 @@ async def verify_employee(
         verified=verified,
         reason=reason,
         similarity=similarity
+    )
+@router.post(
+    "/verify-employee-secure",
+    response_model=SecureVerifyEmployeeResponse,
+    dependencies=[Depends(require_face_api_key)],
+)
+async def verify_employee_secure(
+    user_id: str = Form(..., description="Unique employee identifier"),
+    file: UploadFile = File(..., description="Image containing exactly one face"),
+):
+    database = require_database()
+    doc = await database.face_registry.find_one({"user_id": user_id})
+    if doc is None:
+        return SecureVerifyEmployeeResponse(
+            registered=False,
+            face_verified=False,
+            similarity=None,
+            face_threshold=settings.SIMILARITY_THRESHOLD,
+            live=False,
+            liveness_score=None,
+            liveness_threshold=settings.LIVENESS_THRESHOLD,
+            reason_code="not_registered",
+        )
+
+    contents = await file.read()
+    try:
+        img = decode_image(contents)
+    except HTTPException as exc:
+        raise reason_error(400, "invalid_image") from exc
+
+    faces = service.detect_faces(img)
+    if not faces:
+        raise reason_error(400, "no_face")
+    if len(faces) > 1:
+        raise reason_error(400, "multiple_faces")
+
+    face = faces[0]
+    try:
+        liveness = get_liveness_service().analyze(img, face.bbox)
+    except LivenessUnavailableError as exc:
+        raise reason_error(503, "model_unavailable") from exc
+
+    if not liveness.live:
+        return SecureVerifyEmployeeResponse(
+            registered=True,
+            face_verified=False,
+            similarity=None,
+            face_threshold=settings.SIMILARITY_THRESHOLD,
+            live=False,
+            liveness_score=liveness.score,
+            liveness_threshold=liveness.threshold,
+            reason_code="spoof_detected",
+        )
+
+    registered_embedding = np.asarray(doc["embedding"], dtype=np.float32)
+    similarity = service.compute_similarity(registered_embedding, face.embedding)
+    face_verified = similarity >= settings.SIMILARITY_THRESHOLD
+    return SecureVerifyEmployeeResponse(
+        registered=True,
+        face_verified=face_verified,
+        similarity=similarity,
+        face_threshold=settings.SIMILARITY_THRESHOLD,
+        live=True,
+        liveness_score=liveness.score,
+        liveness_threshold=liveness.threshold,
+        reason_code="verified" if face_verified else "face_mismatch",
     )

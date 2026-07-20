@@ -11,3 +11,6 @@ fake_db = FakeDB()
 
 mock_service = MagicMock()
 mock_service._initialized = True
+
+mock_liveness = MagicMock()
+mock_liveness._initialized = True
