@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     
     # CORS allowed origins
+    LINK_COR: Optional[str] = None
     ALLOWED_ORIGINS: List[str] = ["*"]
 
     # MongoDB configurations

@@ -37,8 +37,11 @@ app = FastAPI(
 )
 
 # CORS Configuration
-allowed_origins = os.environ.get("LINK_COR")
-origins = [allowed_origins] if allowed_origins else settings.ALLOWED_ORIGINS
+allowed_origins_str = settings.LINK_COR or os.environ.get("LINK_COR")
+if allowed_origins_str:
+    origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+else:
+    origins = settings.ALLOWED_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,

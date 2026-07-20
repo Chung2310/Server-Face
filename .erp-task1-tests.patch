@@ -1,0 +1,155 @@
+diff --git a/server/service/insightface.service.test.ts b/server/service/insightface.service.test.ts
+new file mode 100644
+--- /dev/null
++++ b/server/service/insightface.service.test.ts
+@@ -0,0 +1,150 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import {
++  InsightFaceClient,
++  InsightFaceUnavailableError,
++} from "./insightface.service";
++
++const originalUrl = process.env.INSIGHTFACE_URL;
++const originalKey = process.env.INSIGHTFACE_API_KEY;
++
++describe("InsightFaceClient", () => {
++  beforeEach(() => {
++    process.env.INSIGHTFACE_URL = "http://insightface.internal";
++    process.env.INSIGHTFACE_API_KEY = "server-secret";
++  });
++
++  afterEach(() => {
++    vi.unstubAllGlobals();
++    vi.restoreAllMocks();
++    if (originalUrl === undefined) delete process.env.INSIGHTFACE_URL;
++    else process.env.INSIGHTFACE_URL = originalUrl;
++    if (originalKey === undefined) delete process.env.INSIGHTFACE_API_KEY;
++    else process.env.INSIGHTFACE_API_KEY = originalKey;
++  });
++
++  it("sends the server API key and multipart verification payload", async () => {
++    const fetchMock = vi.fn().mockResolvedValue(
++      new Response(
++        JSON.stringify({
++          registered: true,
++          face_verified: true,
++          similarity: 0.91,
++          face_threshold: 0.45,
++          live: true,
++          liveness_score: 0.96,
++          liveness_threshold: 0.8,
++          reason_code: "verified",
++        }),
++        { status: 200, headers: { "content-type": "application/json" } },
++      ),
++    );
++    vi.stubGlobal("fetch", fetchMock);
++    const client = new InsightFaceClient();
++
++    const result = await client.verifyEmployee(
++      "employee-1",
++      Buffer.from("image"),
++      "image/jpeg",
++    );
++
++    expect(result.reasonCode).toBe("verified");
++    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
++    expect(url).toBe(
++      "http://insightface.internal/api/v1/face/verify-employee-secure",
++    );
++    expect(init.headers).toEqual({ "X-API-Key": "server-secret" });
++    expect(init.body).toBeInstanceOf(FormData);
++    const body = init.body as FormData;
++    expect(body.get("user_id")).toBe("employee-1");
++    expect(body.get("file")).toBeInstanceOf(Blob);
++  });
++
++  it("does not manually set multipart content-type", async () => {
++    const fetchMock = vi.fn().mockResolvedValue(
++      new Response(
++        JSON.stringify({
++          user_id: "employee-1",
++          registered: true,
++          created: true,
++          created_at: "2026-07-20T00:00:00Z",
++          updated_at: "2026-07-20T00:00:00Z",
++        }),
++        { status: 200, headers: { "content-type": "application/json" } },
++      ),
++    );
++    vi.stubGlobal("fetch", fetchMock);
++
++    await new InsightFaceClient().registerFace(
++      "employee-1",
++      Buffer.from("image"),
++      "image/png",
++    );
++
++    const init = fetchMock.mock.calls[0][1] as RequestInit;
++    expect(init.headers).not.toHaveProperty("Content-Type");
++  });
++
++  it("maps timeout and network failures to InsightFaceUnavailableError", async () => {
++    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("timeout")));
++
++    await expect(
++      new InsightFaceClient().getRegistrationStatus("employee-1"),
++    ).rejects.toBeInstanceOf(InsightFaceUnavailableError);
++  });
++
++  it("maps malformed successful responses to InsightFaceUnavailableError", async () => {
++    vi.stubGlobal(
++      "fetch",
++      vi.fn().mockResolvedValue(
++        new Response(JSON.stringify({ registered: "yes" }), {
++          status: 200,
++          headers: { "content-type": "application/json" },
++        }),
++      ),
++    );
++
++    await expect(
++      new InsightFaceClient().getRegistrationStatus("employee-1"),
++    ).rejects.toBeInstanceOf(InsightFaceUnavailableError);
++  });
++
++  it("preserves verification business reason codes", async () => {
++    vi.stubGlobal(
++      "fetch",
++      vi.fn().mockResolvedValue(
++        new Response(
++          JSON.stringify({
++            registered: true,
++            face_verified: false,
++            similarity: null,
++            face_threshold: 0.45,
++            live: false,
++            liveness_score: 0.12,
++            liveness_threshold: 0.8,
++            reason_code: "spoof_detected",
++          }),
++          { status: 200, headers: { "content-type": "application/json" } },
++        ),
++      ),
++    );
++
++    const result = await new InsightFaceClient().verifyEmployee(
++      "employee-1",
++      Buffer.from("image"),
++      "image/jpeg",
++    );
++
++    expect(result.reasonCode).toBe("spoof_detected");
++    expect(result.live).toBe(false);
++  });
++
++  it("rejects missing server-only configuration", () => {
++    delete process.env.INSIGHTFACE_URL;
++    delete process.env.INSIGHTFACE_API_KEY;
++
++    expect(() => new InsightFaceClient()).toThrow(
++      "INSIGHTFACE_URL and INSIGHTFACE_API_KEY",
++    );
++  });
++});

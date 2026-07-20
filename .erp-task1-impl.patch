@@ -1,0 +1,244 @@
+diff --git a/server/config/env.ts b/server/config/env.ts
+--- a/server/config/env.ts
++++ b/server/config/env.ts
+@@ -38,0 +39,17 @@
++
++export interface InsightFaceConfig {
++  baseUrl: string;
++  apiKey: string;
++  timeoutMs: number;
++}
++
++export function getInsightFaceConfig(): InsightFaceConfig {
++  const baseUrl = (process.env.INSIGHTFACE_URL || "").trim().replace(/\/$/, "");
++  const apiKey = (process.env.INSIGHTFACE_API_KEY || "").trim();
++  if (!baseUrl || !apiKey) {
++    throw new Error("INSIGHTFACE_URL and INSIGHTFACE_API_KEY must be configured");
++  }
++  const parsedTimeout = Number(process.env.INSIGHTFACE_TIMEOUT_MS || "10000");
++  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 10000;
++  return { baseUrl, apiKey, timeoutMs };
++}
+diff --git a/server/service/insightface.service.ts b/server/service/insightface.service.ts
+new file mode 100644
+--- /dev/null
++++ b/server/service/insightface.service.ts
+@@ -0,0 +1,218 @@
++import { getInsightFaceConfig, type InsightFaceConfig } from "../config/env";
++
++export type FaceReasonCode =
++  | "not_registered"
++  | "invalid_image"
++  | "no_face"
++  | "multiple_faces"
++  | "model_unavailable"
++  | "spoof_detected"
++  | "face_mismatch"
++  | "verified";
++
++export interface FaceVerificationResult {
++  registered: boolean;
++  faceVerified: boolean;
++  similarity: number | null;
++  faceThreshold: number;
++  live: boolean;
++  livenessScore: number | null;
++  livenessThreshold: number;
++  reasonCode: FaceReasonCode;
++}
++
++export interface RegistrationStatusResult {
++  userId: string;
++  registered: boolean;
++  createdAt: string | null;
++  updatedAt: string | null;
++}
++
++export interface RegisterFaceResult {
++  userId: string;
++  registered: boolean;
++  created: boolean;
++  createdAt: string;
++  updatedAt: string;
++}
++
++export interface DeleteRegistrationResult {
++  userId: string;
++  deleted: boolean;
++}
++
++export class InsightFaceUnavailableError extends Error {
++  constructor(message = "InsightFace service is unavailable", options?: ErrorOptions) {
++    super(message, options);
++    this.name = "InsightFaceUnavailableError";
++  }
++}
++
++export class InsightFaceBusinessError extends Error {
++  constructor(public readonly reasonCode: FaceReasonCode) {
++    super(`InsightFace rejected request: ${reasonCode}`);
++    this.name = "InsightFaceBusinessError";
++  }
++}
++
++const REASON_CODES = new Set<FaceReasonCode>([
++  "not_registered",
++  "invalid_image",
++  "no_face",
++  "multiple_faces",
++  "model_unavailable",
++  "spoof_detected",
++  "face_mismatch",
++  "verified",
++]);
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === "object" && value !== null && !Array.isArray(value);
++}
++
++function isBoolean(value: unknown): value is boolean {
++  return typeof value === "boolean";
++}
++
++function isNullableNumber(value: unknown): value is number | null {
++  return value === null || (typeof value === "number" && Number.isFinite(value));
++}
++
++function isNullableString(value: unknown): value is string | null {
++  return value === null || typeof value === "string";
++}
++
++function readReasonCode(value: unknown): FaceReasonCode | null {
++  return typeof value === "string" && REASON_CODES.has(value as FaceReasonCode)
++    ? (value as FaceReasonCode)
++    : null;
++}
++
++export class InsightFaceClient {
++  private readonly config: InsightFaceConfig;
++
++  constructor(config: InsightFaceConfig = getInsightFaceConfig()) {
++    this.config = config;
++  }
++
++  async verifyEmployee(userId: string, image: Buffer, mimeType: string): Promise<FaceVerificationResult> {
++    const payload = this.imagePayload(userId, image, mimeType);
++    const value = await this.request("/api/v1/face/verify-employee-secure", {
++      method: "POST",
++      body: payload,
++    });
++    if (
++      !isRecord(value) ||
++      !isBoolean(value.registered) ||
++      !isBoolean(value.face_verified) ||
++      !isNullableNumber(value.similarity) ||
++      typeof value.face_threshold !== "number" ||
++      !isBoolean(value.live) ||
++      !isNullableNumber(value.liveness_score) ||
++      typeof value.liveness_threshold !== "number"
++    ) {
++      throw new InsightFaceUnavailableError("Malformed InsightFace verification response");
++    }
++    const reasonCode = readReasonCode(value.reason_code);
++    if (!reasonCode) throw new InsightFaceUnavailableError("Unknown InsightFace reason code");
++    return {
++      registered: value.registered,
++      faceVerified: value.face_verified,
++      similarity: value.similarity,
++      faceThreshold: value.face_threshold,
++      live: value.live,
++      livenessScore: value.liveness_score,
++      livenessThreshold: value.liveness_threshold,
++      reasonCode,
++    };
++  }
++
++  async getRegistrationStatus(userId: string): Promise<RegistrationStatusResult> {
++    const value = await this.request(`/api/v1/face/register/${encodeURIComponent(userId)}`);
++    if (
++      !isRecord(value) ||
++      typeof value.user_id !== "string" ||
++      !isBoolean(value.registered) ||
++      !isNullableString(value.created_at) ||
++      !isNullableString(value.updated_at)
++    ) {
++      throw new InsightFaceUnavailableError("Malformed registration status response");
++    }
++    return {
++      userId: value.user_id,
++      registered: value.registered,
++      createdAt: value.created_at,
++      updatedAt: value.updated_at,
++    };
++  }
++
++  async registerFace(userId: string, image: Buffer, mimeType: string): Promise<RegisterFaceResult> {
++    const value = await this.request("/api/v1/face/register", {
++      method: "POST",
++      body: this.imagePayload(userId, image, mimeType),
++    });
++    if (
++      !isRecord(value) ||
++      typeof value.user_id !== "string" ||
++      !isBoolean(value.registered) ||
++      !isBoolean(value.created) ||
++      typeof value.created_at !== "string" ||
++      typeof value.updated_at !== "string"
++    ) {
++      throw new InsightFaceUnavailableError("Malformed face registration response");
++    }
++    return {
++      userId: value.user_id,
++      registered: value.registered,
++      created: value.created,
++      createdAt: value.created_at,
++      updatedAt: value.updated_at,
++    };
++  }
++
++  async deleteRegistration(userId: string): Promise<DeleteRegistrationResult> {
++    const value = await this.request(`/api/v1/face/register/${encodeURIComponent(userId)}`, {
++      method: "DELETE",
++    });
++    if (!isRecord(value) || typeof value.user_id !== "string" || !isBoolean(value.deleted)) {
++      throw new InsightFaceUnavailableError("Malformed delete registration response");
++    }
++    return { userId: value.user_id, deleted: value.deleted };
++  }
++
++  private imagePayload(userId: string, image: Buffer, mimeType: string): FormData {
++    const payload = new FormData();
++    payload.set("user_id", userId);
++    payload.set("file", new Blob([image], { type: mimeType }), "capture");
++    return payload;
++  }
++
++  private async request(path: string, init: RequestInit = {}): Promise<unknown> {
++    let response: Response;
++    try {
++      response = await fetch(`${this.config.baseUrl}${path}`, {
++        ...init,
++        headers: { "X-API-Key": this.config.apiKey },
++        signal: AbortSignal.timeout(this.config.timeoutMs),
++      });
++    } catch (error) {
++      throw new InsightFaceUnavailableError(undefined, { cause: error });
++    }
++
++    let value: unknown;
++    try {
++      value = await response.json();
++    } catch (error) {
++      throw new InsightFaceUnavailableError("InsightFace returned invalid JSON", { cause: error });
++    }
++    if (!response.ok) {
++      const detail = isRecord(value) && isRecord(value.detail) ? value.detail : null;
++      const reasonCode = readReasonCode(detail?.reason_code);
++      if (reasonCode && reasonCode !== "model_unavailable") {
++        throw new InsightFaceBusinessError(reasonCode);
++      }
++      throw new InsightFaceUnavailableError();
++    }
++    return value;
++  }
++}
