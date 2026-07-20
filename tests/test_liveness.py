@@ -56,10 +56,29 @@ def test_analyze_clips_crop_and_preprocesses_bgr_as_nchw_float32(tmp_path):
     service.analyze(image, np.array([-50, -50, 50, 50], dtype=np.float32))
 
     tensor = session.input_feed["input"]
-    expected = image.astype(np.float32).transpose(2, 0, 1)[None, ...] / 255.0
+    expected = image.astype(np.float32).transpose(2, 0, 1)[None, ...]
     assert tensor.dtype == np.float32
     assert tensor.shape == (1, 3, 2, 2)
     np.testing.assert_allclose(tensor, expected)
+
+
+def test_analyze_expands_face_crop_by_model_scale(tmp_path, monkeypatch):
+    session = FakeSession(np.array([[0.0, 2.0]], dtype=np.float32))
+    service = make_service(tmp_path, session, threshold=0.5)
+    captured = {}
+
+    def capture_resize(crop, size, interpolation):
+        captured["shape"] = crop.shape
+        return np.zeros((size[1], size[0], 3), dtype=np.uint8)
+
+    monkeypatch.setattr("app.services.liveness.cv2.resize", capture_resize)
+
+    service.analyze(
+        np.zeros((100, 100, 3), dtype=np.uint8),
+        np.array([40, 40, 60, 60], dtype=np.float32),
+    )
+
+    assert captured["shape"] == (54, 54, 3)
 
 
 @pytest.mark.parametrize(

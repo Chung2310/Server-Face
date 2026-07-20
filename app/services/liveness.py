@@ -22,7 +22,7 @@ class LivenessResult:
 
 class LivenessService:
     _instance = None
-    _crop_scale = 1.2
+    _crop_scale = 2.7
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -108,8 +108,8 @@ class LivenessService:
 
         crop = image[top:bottom, left:right]
         resized = cv2.resize(crop, self.input_size, interpolation=cv2.INTER_LINEAR)
-        normalized = resized.astype(np.float32) / 255.0
-        return np.ascontiguousarray(normalized.transpose(2, 0, 1)[None, ...])
+        tensor = resized.astype(np.float32)
+        return np.ascontiguousarray(tensor.transpose(2, 0, 1)[None, ...])
 
     def _validate_output(self, outputs) -> np.ndarray:
         if not outputs:
