@@ -11,6 +11,7 @@ services:
     volumes:
       - .env:/app/.env
       - ${MODEL_DIR:-~/.insightface}:/root/.insightface
+      - ./models:/models
     networks:
       - default_network
     extra_hosts:
