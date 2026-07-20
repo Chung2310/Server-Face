@@ -102,7 +102,9 @@ def test_secure_verification_requires_exactly_one_face(
     liveness.analyze.assert_not_called()
 
 
-def test_secure_verification_fails_closed_when_liveness_is_unavailable(client, liveness):
+def test_secure_verification_fails_closed_when_liveness_is_unavailable(
+    client, liveness, caplog
+):
     _register_doc()
     mock_service.detect_faces.return_value = [_face()]
     liveness.analyze.side_effect = LivenessUnavailableError("unavailable")
@@ -114,6 +116,12 @@ def test_secure_verification_fails_closed_when_liveness_is_unavailable(client, l
 
     assert response.status_code == 503
     assert response.json()["detail"] == {"reason_code": "model_unavailable"}
+    assert any(
+        record.exc_info
+        and "secure verification" in record.getMessage()
+        and "emp1" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_secure_verification_rejects_spoof_before_face_comparison(client, liveness):
@@ -199,3 +207,27 @@ def test_register_rejects_spoof_and_preserves_existing_embedding(client, livenes
     assert response.status_code == 400
     assert response.json()["detail"]["reason_code"] == "spoof_detected"
     assert fake_db.face_registry.docs[0]["embedding"] == original_embedding
+
+
+def test_registration_logs_liveness_unavailable_with_traceback(client, liveness, caplog):
+    mock_service.detect_faces.return_value = [_face()]
+    liveness.analyze.side_effect = LivenessUnavailableError("inference failed")
+    with patch(
+        "app.routers.face.decode_image",
+        return_value=np.zeros((100, 100, 3), dtype=np.uint8),
+    ):
+        response = client.post(
+            "/api/v1/face/register",
+            data={"user_id": "emp1"},
+            files={"file": ("face.jpg", b"fake-image", "image/jpeg")},
+            headers=API_KEY_HEADER,
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {"reason_code": "model_unavailable"}
+    assert any(
+        record.exc_info
+        and "face registration" in record.getMessage()
+        and "emp1" in record.getMessage()
+        for record in caplog.records
+    )

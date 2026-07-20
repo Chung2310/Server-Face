@@ -198,7 +198,10 @@ async def register_face_from_image(user_id: str, contents: bytes) -> RegisterFac
     try:
         liveness = get_liveness_service().analyze(img, face.bbox)
     except LivenessUnavailableError as exc:
-        logger.error(f"Registration failed for user_id: {user_id} - liveness model_unavailable")
+        logger.exception(
+            "Liveness model unavailable during face registration for user_id: %s",
+            user_id,
+        )
         raise reason_error(503, "model_unavailable") from exc
     if not liveness.live:
         logger.warning(f"Registration failed for user_id: {user_id} - spoof_detected (score: {liveness.score:.4f}, threshold: {liveness.threshold})")
@@ -410,6 +413,10 @@ async def verify_employee_secure(
     try:
         liveness = get_liveness_service().analyze(img, face.bbox)
     except LivenessUnavailableError as exc:
+        logger.exception(
+            "Liveness model unavailable during secure verification for user_id: %s",
+            user_id,
+        )
         raise reason_error(503, "model_unavailable") from exc
 
     if not liveness.live:
