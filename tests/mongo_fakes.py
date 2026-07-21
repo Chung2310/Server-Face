@@ -51,6 +51,22 @@ class FakeCollection:
             return SimpleNamespace(matched_count=0, modified_count=0, upserted_id="new-id")
         return SimpleNamespace(matched_count=0, modified_count=0, upserted_id=None)
 
+    async def find_one_and_update(self, query, update, return_document=False, upsert=False):
+        for doc in self.docs:
+            if self._matches(doc, query):
+                before = dict(doc)
+                doc.update(update.get("$set", {}))
+                return doc if return_document else before
+        if upsert:
+            new_doc = {}
+            new_doc.update(update.get("$setOnInsert", {}))
+            new_doc.update(update.get("$set", {}))
+            for k, v in (query or {}).items():
+                new_doc.setdefault(k, v)
+            self.docs.append(new_doc)
+            return new_doc if return_document else None
+        return None
+
     async def delete_one(self, query):
         for i, doc in enumerate(self.docs):
             if self._matches(doc, query):
@@ -78,6 +94,7 @@ class FakeDB:
         self.admins = FakeCollection()
         self.admin_sessions = FakeCollection()
         self.face_registry = FakeCollection()
+        self.face_challenges = FakeCollection()
         self.client = SimpleNamespace(admin=_FakeAdmin())
         self.name = "fake-db"
 
@@ -85,3 +102,4 @@ class FakeDB:
         self.admins.docs.clear()
         self.admin_sessions.docs.clear()
         self.face_registry.docs.clear()
+        self.face_challenges.docs.clear()

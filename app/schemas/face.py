@@ -89,3 +89,16 @@ class SecureVerifyEmployeeResponse(BaseModel):
     liveness_score: Optional[float] = None
     liveness_threshold: float
     reason_code: str
+
+class VideoChallengeResponse(BaseModel):
+    challenge_id: str = Field(..., description="Opaque one-time challenge identifier")
+    action: str = Field(..., description="Requested motion action: turn_left, turn_right, or blink")
+    expires_in_seconds: int = Field(..., description="Seconds until the challenge expires unused")
+
+class VideoLivenessVerifyResponse(BaseModel):
+    verified: bool
+    liveness_score: float
+    passive_score: float
+    motion_score: float
+    reason_code: str
+    sampled_frames: int

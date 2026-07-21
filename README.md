@@ -82,6 +82,23 @@ curl -X POST http://localhost:8000/api/v1/face/verify-employee-secure \
   -F "user_id=emp001" -F "file=@capture.jpg"
 ```
 
+### Video Liveness Challenges (integration API, requires `X-API-Key`)
+
+Active liveness combines a passive per-frame model score with a requested motion (a head turn or a blink) recorded in a single short video. Issue a one-time challenge, record the requested action, then submit the video before it expires. Videos are decoded in memory and never persisted; only short-lived challenge metadata (`challenge_id`, `action`, `status`, `expires_at`) is stored in MongoDB with a TTL index. A challenge can only be consumed once (atomic `find_one_and_update`); a second submission gets `409 challenge_used`.
+
+Limits are server-owned and configurable via `.env`: max upload `VIDEO_LIVENESS_MAX_BYTES` (default 10 MB), max duration `VIDEO_LIVENESS_MAX_SECONDS` (default 5s), minimum sampled frames `VIDEO_LIVENESS_MIN_FRAMES` (default 12), challenge TTL `VIDEO_LIVENESS_CHALLENGE_TTL_SECONDS` (default 60s). The final `liveness_score` is `min(passive_score, motion_score)`, and `verified` requires both to clear their thresholds. Reason codes include `challenge_not_found`, `challenge_used`, `challenge_expired`, `video_too_large`, `invalid_video`, `video_too_long`, `video_too_short`, `no_face`, `face_lost`, `multiple_faces`, `model_unavailable`, `challenge_failed`, `spoof_detected`, and `verified`.
+
+```bash
+# Issue a one-time challenge (returns challenge_id and the requested action)
+curl -X POST http://localhost:8000/api/v1/face/liveness/challenges \
+  -H "X-API-Key: $FACE_API_KEY"
+
+# Submit the recorded video (WebM or MP4) for the returned challenge_id
+curl -X POST http://localhost:8000/api/v1/face/liveness/verify-video \
+  -H "X-API-Key: $FACE_API_KEY" \
+  -F "challenge_id=$CHALLENGE_ID" -F "file=@capture.webm"
+```
+
 ### Admin (session cookie)
 
 Admin login uses an HttpOnly session cookie backed by MongoDB. The bootstrap admin is created at startup from `ADMIN_USERNAME` / `ADMIN_PASSWORD`.

@@ -66,6 +66,8 @@ async def initialize_database() -> None:
         await database.admin_sessions.create_index("token_hash", unique=True)
         await database.admin_sessions.create_index("expires_at", expireAfterSeconds=0)
         await database.face_registry.create_index("user_id", unique=True)
+        await database.face_challenges.create_index("challenge_id", unique=True)
+        await database.face_challenges.create_index("expires_at", expireAfterSeconds=0)
 
         from app.services.admin_auth import ensure_bootstrap_admin
         await ensure_bootstrap_admin(database)

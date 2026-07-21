@@ -47,6 +47,18 @@ class Settings(BaseSettings):
     # Integration API key for face registry management (X-API-Key)
     FACE_API_KEY: Optional[str] = None
 
+    # Video liveness challenge configuration
+    VIDEO_LIVENESS_CHALLENGE_TTL_SECONDS: int = 60
+    VIDEO_LIVENESS_MAX_BYTES: int = 10 * 1024 * 1024
+    VIDEO_LIVENESS_MAX_SECONDS: float = 5.0
+    VIDEO_LIVENESS_MIN_FRAMES: int = 12
+    VIDEO_LIVENESS_SAMPLE_FPS: float = 8.0
+    VIDEO_LIVENESS_TURN_DEGREES: float = 15.0
+    VIDEO_LIVENESS_NEUTRAL_DEGREES: float = 5.0
+    VIDEO_LIVENESS_BLINK_CLOSED_RATIO: float = 0.5
+    VIDEO_LIVENESS_BLINK_OPEN_RATIO: float = 0.8
+    VIDEO_LIVENESS_MOTION_THRESHOLD: float = 0.6
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()

@@ -1,5 +1,6 @@
 import cv2
 import logging
+import secrets
 import numpy as np
 from typing import List
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
@@ -7,6 +8,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Q
 logger = logging.getLogger("uvicorn.error")
 from app.services.face_analysis import FaceAnalysisService
 from app.services.liveness import LivenessService, LivenessUnavailableError
+from app.services.video_liveness import VideoLivenessService, VideoLivenessError
 from app.schemas.face import (
     FaceDetectionResponse, BoundingBox, FaceLandmark,
     FaceEmbeddingResponse, VerifyEmbeddingsRequest, VerifyResponse,
@@ -14,12 +16,15 @@ from app.schemas.face import (
     VerifyEmployeeResponse, RegisterFaceResponse,
     RegistrationStatusResponse, DeleteRegistrationResponse,
     FaceRegistrationInfo, SecureVerifyEmployeeResponse,
+    VideoChallengeResponse, VideoLivenessVerifyResponse,
 )
 from app.config import settings
 from app.dependencies import require_face_api_key
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from app.database import db, require_database
+
+VIDEO_LIVENESS_ACTIONS = ("turn_left", "turn_right", "blink")
 
 router = APIRouter(prefix="/face", tags=["Face Operations"])
 service = FaceAnalysisService()
@@ -28,6 +33,11 @@ service = FaceAnalysisService()
 def get_liveness_service() -> LivenessService:
     """Construct lazily so an unprovisioned model fails per request, not at import."""
     return LivenessService()
+
+
+def get_video_liveness_service() -> VideoLivenessService:
+    """Construct lazily so an unprovisioned model fails per request, not at import."""
+    return VideoLivenessService()
 
 
 def reason_error(status_code: int, reason_code: str) -> HTTPException:
@@ -443,4 +453,74 @@ async def verify_employee_secure(
         liveness_score=liveness.score,
         liveness_threshold=liveness.threshold,
         reason_code="verified" if face_verified else "face_mismatch",
+    )
+
+# ── Video liveness challenges (API-key protected) ──
+
+@router.post(
+    "/liveness/challenges",
+    response_model=VideoChallengeResponse,
+    dependencies=[Depends(require_face_api_key)],
+)
+async def create_video_challenge():
+    """
+    Issues a one-time video liveness challenge. The returned challenge_id must
+    be submitted with a matching video to /liveness/verify-video within the
+    TTL; it can only be consumed once.
+    """
+    database = require_database()
+    action = secrets.choice(VIDEO_LIVENESS_ACTIONS)
+    challenge_id = secrets.token_urlsafe(24)
+    now = datetime.now(timezone.utc)
+    ttl = settings.VIDEO_LIVENESS_CHALLENGE_TTL_SECONDS
+    await database.face_challenges.insert_one({
+        "challenge_id": challenge_id,
+        "action": action,
+        "status": "pending",
+        "created_at": now,
+        "expires_at": now + timedelta(seconds=ttl),
+    })
+    return VideoChallengeResponse(challenge_id=challenge_id, action=action, expires_in_seconds=ttl)
+
+@router.post(
+    "/liveness/verify-video",
+    response_model=VideoLivenessVerifyResponse,
+    dependencies=[Depends(require_face_api_key)],
+)
+async def verify_video_liveness(
+    challenge_id: str = Form(..., description="Challenge id returned by /liveness/challenges"),
+    file: UploadFile = File(..., description="WebM or MP4 recording of the requested action"),
+):
+    """
+    Atomically consumes a pending challenge and analyzes the uploaded video for
+    the requested motion, combined with per-frame passive liveness.
+    """
+    database = require_database()
+    doc = await database.face_challenges.find_one_and_update(
+        {"challenge_id": challenge_id, "status": "pending"},
+        {"$set": {"status": "used", "used_at": datetime.now(timezone.utc)}},
+        return_document=True,
+    )
+    if doc is None:
+        existing = await database.face_challenges.find_one({"challenge_id": challenge_id})
+        if existing is None:
+            raise reason_error(404, "challenge_not_found")
+        raise reason_error(409, "challenge_used")
+    if doc["expires_at"] < datetime.now(timezone.utc):
+        raise reason_error(410, "challenge_expired")
+
+    contents = await file.read()
+    analyzer = get_video_liveness_service()
+    try:
+        result = analyzer.analyze_bytes(contents, file.filename, doc["action"])
+    except VideoLivenessError as exc:
+        raise reason_error(400, exc.reason_code) from exc
+
+    return VideoLivenessVerifyResponse(
+        verified=result.verified,
+        liveness_score=result.liveness_score,
+        passive_score=result.passive_score,
+        motion_score=result.motion_score,
+        reason_code=result.reason_code,
+        sampled_frames=result.sampled_frames,
     )
