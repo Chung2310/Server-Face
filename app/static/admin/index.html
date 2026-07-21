@@ -419,6 +419,79 @@
     .badge-info    { background: rgba(99,102,241,0.12); color: var(--accent-light); border: 1px solid rgba(99,102,241,0.2); }
     .badge-warning { background: rgba(245,158,11,0.12); color: var(--warning); border: 1px solid rgba(245,158,11,0.2); }
 
+    /* Filter Bar */
+    .filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+      padding: 20px;
+      background: rgba(99,102,241,0.04);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 20px;
+    }
+    .filter-group { display: flex; flex-direction: column; gap: 5px; min-width: 140px; }
+    .filter-group label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .filter-group .form-input { padding: 8px 12px; font-size: 13px; }
+    .filter-actions { display: flex; gap: 8px; align-items: flex-end; margin-left: auto; }
+
+    /* Attendance stats row */
+    .att-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .att-stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      text-align: center;
+    }
+    .att-stat-card .val { font-size: 28px; font-weight: 800; line-height: 1.1; }
+    .att-stat-card .lbl { font-size: 11px; color: var(--text-muted); margin-top: 4px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+    .att-stat-card.success .val { color: var(--success); }
+    .att-stat-card.danger  .val { color: var(--danger); }
+    .att-stat-card.accent  .val { background: linear-gradient(135deg, var(--text-primary), var(--accent-light)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .att-stat-card.warning .val { color: var(--warning); }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .pagination-info { font-size: 13px; color: var(--text-muted); }
+    .pagination-btns { display: flex; gap: 6px; }
+    .page-btn {
+      padding: 6px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(99,102,241,0.08);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .page-btn:hover:not(:disabled) { background: rgba(99,102,241,0.2); border-color: var(--border-hover); color: var(--accent-light); }
+    .page-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Similarity mini bar inline */
+    .sim-bar { display: flex; align-items: center; gap: 8px; }
+    .sim-bar-track { flex: 1; height: 4px; background: rgba(99,102,241,0.12); border-radius: 99px; overflow: hidden; min-width: 60px; }
+    .sim-bar-fill { height: 100%; border-radius: 99px; }
+    .sim-bar-fill.ok  { background: linear-gradient(90deg, var(--success), #34d399); }
+    .sim-bar-fill.bad { background: linear-gradient(90deg, var(--danger), #fb7185); }
+    .sim-val { font-size: 12px; font-weight: 600; min-width: 38px; text-align: right; }
+
+
     /* Form Upload */
     .upload-zone {
       border: 2px dashed var(--border);
@@ -619,6 +692,10 @@
       <button id="tab-simulator" class="nav-tab" :class="{ active: activeTab === 'simulator' }" @click="activeTab = 'simulator'">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         Kiểm thử check-in
+      </button>
+      <button id="tab-attendance" class="nav-tab" :class="{ active: activeTab === 'attendance' }" @click="switchToAttendance">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="8.01" y2="14"/><line x1="12" y1="14" x2="12.01" y2="14"/><line x1="16" y1="14" x2="16.01" y2="14"/></svg>
+        Lịch sử chấm công
       </button>
     </nav>
 
@@ -888,6 +965,185 @@
         </div>
       </div>
     </main>
+
+    <!-- Tab: Attendance History -->
+    <main class="content" v-if="activeTab === 'attendance'">
+      <div class="section-header mb-20">
+        <div class="section-title">
+          <div class="section-title-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </div>
+          Lịch sử chấm công
+        </div>
+        <button class="btn btn-ghost btn-sm" @click="fetchAttendanceLogs" :disabled="attLoading">
+          <span class="spinner" v-if="attLoading"></span>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Tải lại
+        </button>
+      </div>
+
+      <!-- Quick stats -->
+      <div class="att-stats" v-if="attStats">
+        <div class="att-stat-card accent">
+          <div class="val">{{ attStats.total_all }}</div>
+          <div class="lbl">Tổng lượt</div>
+        </div>
+        <div class="att-stat-card success">
+          <div class="val">{{ attStats.success_all }}</div>
+          <div class="lbl">Thành công</div>
+        </div>
+        <div class="att-stat-card danger">
+          <div class="val">{{ attStats.failed_all }}</div>
+          <div class="lbl">Thất bại</div>
+        </div>
+        <div class="att-stat-card warning">
+          <div class="val">{{ attStats.success_rate }}%</div>
+          <div class="lbl">Tỷ lệ khớp</div>
+        </div>
+        <div class="att-stat-card success">
+          <div class="val">{{ attStats.today_success }}</div>
+          <div class="lbl">Hôm nay (✔)</div>
+        </div>
+        <div class="att-stat-card danger">
+          <div class="val">{{ attStats.today_failed }}</div>
+          <div class="lbl">Hôm nay (✘)</div>
+        </div>
+      </div>
+
+      <!-- Filter Bar -->
+      <div class="filter-bar">
+        <div class="filter-group">
+          <label>Mã nhân viên</label>
+          <input id="att-filter-userid" v-model="attFilter.userId" type="text" class="form-input" placeholder="Tìm kiếm..." @keyup.enter="applyAttFilter" />
+        </div>
+        <div class="filter-group">
+          <label>Kết quả</label>
+          <select id="att-filter-verified" v-model="attFilter.verified" class="form-input">
+            <option value="">Tất cả</option>
+            <option value="true">Thành công ✔</option>
+            <option value="false">Thất bại ✘</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Ngày bắt đầu</label>
+          <input id="att-filter-date-from" v-model="attFilter.dateFrom" type="date" class="form-input" />
+        </div>
+        <div class="filter-group">
+          <label>Ngày kết thúc</label>
+          <input id="att-filter-date-to" v-model="attFilter.dateTo" type="date" class="form-input" />
+        </div>
+        <div class="filter-group">
+          <label>Năm</label>
+          <input id="att-filter-year" v-model.number="attFilter.year" type="number" class="form-input" placeholder="VD: 2025" min="2020" max="2099" />
+        </div>
+        <div class="filter-group">
+          <label>Tháng</label>
+          <select id="att-filter-month" v-model.number="attFilter.month" class="form-input">
+            <option value="">Tất cả</option>
+            <option v-for="m in 12" :value="m">Tháng {{ m }}</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Ngày</label>
+          <input id="att-filter-day" v-model.number="attFilter.day" type="number" class="form-input" placeholder="1-31" min="1" max="31" />
+        </div>
+        <div class="filter-group">
+          <label>Giờ từ</label>
+          <input id="att-filter-hour-from" v-model.number="attFilter.hourFrom" type="number" class="form-input" placeholder="0-23" min="0" max="23" />
+        </div>
+        <div class="filter-group">
+          <label>Giờ đến</label>
+          <input id="att-filter-hour-to" v-model.number="attFilter.hourTo" type="number" class="form-input" placeholder="0-23" min="0" max="23" />
+        </div>
+        <div class="filter-actions">
+          <button id="att-filter-apply" class="btn btn-primary btn-sm" @click="applyAttFilter" :disabled="attLoading">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Lọc
+          </button>
+          <button id="att-filter-reset" class="btn btn-ghost btn-sm" @click="resetAttFilter">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Xóa bộ lọc
+          </button>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-12" style="margin-bottom:16px">
+          <div class="card-title" style="margin-bottom:0">Kết quả</div>
+          <span class="badge badge-info">{{ attData.total }} bản ghi</span>
+        </div>
+
+        <div v-if="attLoading" class="text-center py-40">
+          <span class="spinner" style="width:28px;height:28px;border-width:3px"></span>
+          <p class="text-muted" style="margin-top:12px">Đang tải dữ liệu...</p>
+        </div>
+
+        <div class="table-wrap" v-else-if="attData.data.length > 0">
+          <table>
+            <thead>
+              <tr>
+                <th>Mã NV</th>
+                <th>Kết quả</th>
+                <th>Thời gian</th>
+                <th>Giờ (VN)</th>
+                <th>Độ khớp</th>
+                <th>Lý do</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="log in attData.data" :key="log.id">
+                <td>
+                  <span class="badge badge-info">{{ log.user_id }}</span>
+                </td>
+                <td>
+                  <span class="badge" :class="log.verified ? 'badge-success' : 'badge-danger'">
+                    {{ log.verified ? '✔ Thành công' : '✘ Thất bại' }}
+                  </span>
+                </td>
+                <td class="text-muted">{{ formatDateTime(log.timestamp) }}</td>
+                <td class="text-muted">{{ formatHour(log.timestamp) }}</td>
+                <td>
+                  <div class="sim-bar" v-if="log.similarity !== null && log.similarity !== undefined">
+                    <div class="sim-bar-track">
+                      <div class="sim-bar-fill" :class="log.verified ? 'ok' : 'bad'" :style="{ width: (log.similarity * 100) + '%' }"></div>
+                    </div>
+                    <span class="sim-val" :style="{ color: log.verified ? 'var(--success)' : 'var(--danger)' }">{{ (log.similarity * 100).toFixed(1) }}%</span>
+                  </div>
+                  <span class="text-muted" v-else>—</span>
+                </td>
+                <td class="text-muted" style="max-width:260px;word-break:break-word;font-size:12px;">{{ log.reason }}</td>
+                <td class="text-muted" style="font-size:12px">{{ log.ip_address || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="empty-state" v-else-if="!attLoading">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <p>Không có dữ liệu chấm công phù hợp bộ lọc hiện tại.</p>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination" v-if="attData.total_pages > 1">
+          <div class="pagination-info">Trang {{ attData.page }} / {{ attData.total_pages }} &mdash; {{ attData.total }} bản ghi</div>
+          <div class="pagination-btns">
+            <button class="page-btn" @click="goAttPage(1)" :disabled="attData.page <= 1">&#171;</button>
+            <button class="page-btn" @click="goAttPage(attData.page - 1)" :disabled="attData.page <= 1">‹</button>
+            <button
+              v-for="p in attPageRange"
+              :key="p"
+              class="page-btn"
+              :class="{ active: p === attData.page }"
+              @click="goAttPage(p)"
+            >{{ p }}</button>
+            <button class="page-btn" @click="goAttPage(attData.page + 1)" :disabled="attData.page >= attData.total_pages">›</button>
+            <button class="page-btn" @click="goAttPage(attData.total_pages)" :disabled="attData.page >= attData.total_pages">&#187;</button>
+          </div>
+        </div>
+      </div>
+    </main>
   </template>
 
   <!-- Toast notifications -->
@@ -977,6 +1233,12 @@ createApp({
       if (registry.value.length === 0) fetchRegistry();
     }
 
+    function switchToAttendance() {
+      activeTab.value = 'attendance';
+      if (!attStats.value) fetchAttendanceStats();
+      if (attData.value.data.length === 0) fetchAttendanceLogs();
+    }
+
     // ── Metrics ───────────────────────────────────────────
     const metrics = ref(null);
     const lastUpdated = ref('');
@@ -1040,6 +1302,21 @@ createApp({
       if (!dateStr) return '—';
       try { return new Date(dateStr).toLocaleString('vi-VN'); }
       catch { return dateStr; }
+    }
+
+    function formatDateTime(dateStr) {
+      if (!dateStr) return '—';
+      try {
+        return new Date(dateStr).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+      } catch { return dateStr; }
+    }
+
+    function formatHour(dateStr) {
+      if (!dateStr) return '—';
+      try {
+        const d = new Date(dateStr);
+        return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
+      } catch { return '—'; }
     }
 
     // ── Register ──────────────────────────────────────────
@@ -1247,6 +1524,80 @@ createApp({
       finally { simLoading.value = false; }
     }
 
+    // ── Attendance History ───────────────────────────────────────
+    const attFilter = ref({
+      userId: '', verified: '', dateFrom: '', dateTo: '',
+      year: '', month: '', day: '', hourFrom: '', hourTo: '',
+    });
+    const attData = ref({ total: 0, page: 1, limit: 20, total_pages: 0, data: [] });
+    const attStats = ref(null);
+    const attLoading = ref(false);
+    const attCurrentPage = ref(1);
+
+    const attPageRange = Vue.computed(() => {
+      const total = attData.value.total_pages;
+      const cur   = attData.value.page;
+      if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+      const pages = new Set([1, total, cur, cur - 1, cur + 1, cur - 2, cur + 2]);
+      return [...pages].filter(p => p >= 1 && p <= total).sort((a, b) => a - b);
+    });
+
+    function buildAttQuery(page = 1) {
+      const f = attFilter.value;
+      const params = new URLSearchParams();
+      params.set('page',  page);
+      params.set('limit', attData.value.limit);
+      if (f.userId)   params.set('user_id',   f.userId.trim());
+      if (f.verified !== '') params.set('verified', f.verified);
+      if (f.dateFrom) params.set('date_from', f.dateFrom);
+      if (f.dateTo)   params.set('date_to',   f.dateTo);
+      if (f.year)     params.set('year',       f.year);
+      if (f.month)    params.set('month',      f.month);
+      if (f.day)      params.set('day',        f.day);
+      if (f.hourFrom !== '') params.set('hour_from', f.hourFrom);
+      if (f.hourTo   !== '') params.set('hour_to',   f.hourTo);
+      return params.toString();
+    }
+
+    async function fetchAttendanceLogs(page = attCurrentPage.value) {
+      attLoading.value = true;
+      try {
+        const qs  = buildAttQuery(page);
+        const res = await fetch(`/api/v1/admin/attendance-logs?${qs}`, { credentials: 'same-origin' });
+        if (res.status === 401) { isLoggedIn.value = false; return; }
+        if (res.ok) {
+          attData.value = await res.json();
+          attCurrentPage.value = page;
+        } else {
+          showToast('Không thể tải lịch sử chấm công.', 'error');
+        }
+      } catch { showToast('Lỗi kết nối khi tải lịch sử.', 'error'); }
+      finally { attLoading.value = false; }
+    }
+
+    async function fetchAttendanceStats() {
+      try {
+        const res = await fetch('/api/v1/admin/attendance-logs/stats', { credentials: 'same-origin' });
+        if (res.ok) attStats.value = await res.json();
+      } catch { /* silent */ }
+    }
+
+    function applyAttFilter() {
+      attCurrentPage.value = 1;
+      fetchAttendanceLogs(1);
+      fetchAttendanceStats();
+    }
+
+    function resetAttFilter() {
+      attFilter.value = { userId: '', verified: '', dateFrom: '', dateTo: '', year: '', month: '', day: '', hourFrom: '', hourTo: '' };
+      applyAttFilter();
+    }
+
+    function goAttPage(p) {
+      if (p < 1 || p > attData.value.total_pages) return;
+      fetchAttendanceLogs(p);
+    }
+
     // ── Toast ─────────────────────────────────────────────
     const toasts = ref([]);
     function showToast(msg, type = 'info') {
@@ -1259,7 +1610,7 @@ createApp({
       // auth
       isLoggedIn, currentUser, loginForm, loginError, loginLoading, doLogin, logout,
       // tabs
-      activeTab, switchToRegistry,
+      activeTab, switchToRegistry, switchToAttendance,
       // metrics
       metrics, lastUpdated, metricsLoading, fetchMetrics,
       // registry
@@ -1270,6 +1621,10 @@ createApp({
       // sim
       simForm, simPreviewUrl, simResult, simLoading, onSimFileChange, runSimulation,
       cameraVideo, cameraCanvas, cameraActive, startCamera, stopCamera, captureCamera,
+      // attendance
+      attFilter, attData, attStats, attLoading, attPageRange,
+      fetchAttendanceLogs, fetchAttendanceStats, applyAttFilter, resetAttFilter, goAttPage,
+      formatDateTime, formatHour,
       // toasts
       toasts,
     };

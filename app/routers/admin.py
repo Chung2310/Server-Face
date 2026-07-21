@@ -1,13 +1,15 @@
+import math
 import psutil
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, File, Form
-from typing import List
+from datetime import datetime, timezone
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, UploadFile, File, Form
 
 from app.config import settings
 from app.database import get_db, require_database
 from app.schemas.face import (
     AdminLoginRequest, AdminMeResponse, RegisterFaceResponse,
     RegistrationStatusResponse, DeleteRegistrationResponse, FaceRegistrationInfo,
+    AttendanceLogEntry, AttendanceLogsResponse,
 )
 from app.services.admin_auth import (
     verify_password, create_session, delete_session, get_current_admin,
@@ -125,3 +127,157 @@ async def admin_face_status(user_id: str, username: str = Depends(get_current_ad
 @router.delete("/faces/{user_id}", response_model=DeleteRegistrationResponse, summary="Xóa đăng ký khuôn mặt")
 async def admin_delete_face(user_id: str, username: str = Depends(get_current_admin)):
     return await delete_registration(user_id)
+
+
+# ── Attendance logs endpoints ──
+
+@router.get(
+    "/attendance-logs",
+    response_model=AttendanceLogsResponse,
+    summary="Lịch sử chấm công - lịch sử xác thực khuôn mặt",
+)
+async def get_attendance_logs(
+    username: str = Depends(get_current_admin),
+    user_id: Optional[str] = Query(None, description="Lọc theo mã nhân viên (chứa)"),
+    verified: Optional[bool] = Query(None, description="Lọc theo kết quả: true=thành công, false=thất bại"),
+    date_from: Optional[str] = Query(None, description="Ngày bắt đầu (YYYY-MM-DD)"),
+    date_to:   Optional[str] = Query(None, description="Ngày kết thúc (YYYY-MM-DD)"),
+    year:      Optional[int] = Query(None, description="Lọc theo năm"),
+    month:     Optional[int] = Query(None, ge=1, le=12, description="Lọc theo tháng (1-12)"),
+    day:       Optional[int] = Query(None, ge=1, le=31, description="Lọc theo ngày trong tháng (1-31)"),
+    hour_from: Optional[int] = Query(None, ge=0, le=23, description="Giờ bắt đầu (0-23)"),
+    hour_to:   Optional[int] = Query(None, ge=0, le=23, description="Giờ kết thúc (0-23)"),
+    page:      int           = Query(1, ge=1, description="Trang hiện tại"),
+    limit:     int           = Query(20, ge=1, le=100, description="Số bản ghi mỗi trang"),
+):
+    """
+    Trả về lịch sử xác thực khuôn mặt (chấm công) có filter và phân trang.
+    Hỗ trợ lọc theo: mã nhân viên, kết quả, khoảng ngày, năm, tháng, ngày, giờ.
+    """
+    db = require_database()
+
+    # Build MongoDB filter query
+    query: dict = {}
+
+    if user_id:
+        query["user_id"] = {"$regex": user_id, "$options": "i"}
+
+    if verified is not None:
+        query["verified"] = verified
+
+    # Time range filter using $gte / $lte on timestamp
+    time_filter: dict = {}
+    if date_from:
+        try:
+            dt_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            time_filter["$gte"] = dt_from
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date_from phải có định dạng YYYY-MM-DD")
+    if date_to:
+        try:
+            from datetime import timedelta
+            dt_to = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+            time_filter["$lt"] = dt_to
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date_to phải có định dạng YYYY-MM-DD")
+    if time_filter:
+        query["timestamp"] = time_filter
+
+    # Year/Month/Day/Hour filters using aggregation pipeline when needed
+    use_pipeline = any(v is not None for v in [year, month, day, hour_from, hour_to])
+
+    if use_pipeline:
+        pipeline_match: dict = {**query}
+        pipeline = [
+            {"$addFields": {
+                "_year":  {"$year": {"date": "$timestamp", "timezone": "+07:00"}},
+                "_month": {"$month": {"date": "$timestamp", "timezone": "+07:00"}},
+                "_day":   {"$dayOfMonth": {"date": "$timestamp", "timezone": "+07:00"}},
+                "_hour":  {"$hour": {"date": "$timestamp", "timezone": "+07:00"}},
+            }},
+        ]
+        if pipeline_match:
+            pipeline.insert(0, {"$match": pipeline_match})
+
+        extra_match: dict = {}
+        if year:       extra_match["_year"]  = year
+        if month:      extra_match["_month"] = month
+        if day:        extra_match["_day"]   = day
+        if hour_from is not None and hour_to is not None:
+            extra_match["_hour"] = {"$gte": hour_from, "$lte": hour_to}
+        elif hour_from is not None:
+            extra_match["_hour"] = {"$gte": hour_from}
+        elif hour_to is not None:
+            extra_match["_hour"] = {"$lte": hour_to}
+
+        if extra_match:
+            pipeline.append({"$match": extra_match})
+
+        pipeline += [
+            {"$sort": {"timestamp": -1}},
+            {"$facet": {
+                "total": [{"$count": "count"}],
+                "data":  [{"$skip": (page - 1) * limit}, {"$limit": limit}],
+            }},
+        ]
+
+        cursor = db.verification_logs.aggregate(pipeline)
+        result_docs = await cursor.to_list(length=1)
+        if not result_docs:
+            return AttendanceLogsResponse(total=0, page=page, limit=limit, total_pages=0, data=[])
+        facet = result_docs[0]
+        total = facet["total"][0]["count"] if facet["total"] else 0
+        docs = facet["data"]
+    else:
+        total = await db.verification_logs.count_documents(query)
+        cursor = db.verification_logs.find(query).sort("timestamp", -1).skip((page - 1) * limit).limit(limit)
+        docs = await cursor.to_list(length=limit)
+
+    entries = []
+    for doc in docs:
+        entries.append(AttendanceLogEntry(
+            id=str(doc["_id"]),
+            user_id=doc.get("user_id", ""),
+            verified=doc.get("verified", False),
+            similarity=doc.get("similarity"),
+            reason=doc.get("reason", ""),
+            timestamp=doc.get("timestamp"),
+            ip_address=doc.get("ip_address"),
+            device_info=doc.get("device_info"),
+        ))
+
+    total_pages = math.ceil(total / limit) if total > 0 else 0
+    return AttendanceLogsResponse(
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=total_pages,
+        data=entries,
+    )
+
+
+@router.get(
+    "/attendance-logs/stats",
+    summary="Thống kê chấm công tổng hợp",
+)
+async def get_attendance_stats(username: str = Depends(get_current_admin)):
+    """Trả về thống kê nhanh: tổng lượt, thành công, thất bại hôm nay và toàn bộ."""
+    db = require_database()
+    from datetime import timedelta
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end   = today_start + timedelta(days=1)
+
+    total_all     = await db.verification_logs.count_documents({})
+    success_all   = await db.verification_logs.count_documents({"verified": True})
+    today_all     = await db.verification_logs.count_documents({"timestamp": {"$gte": today_start, "$lt": today_end}})
+    today_success = await db.verification_logs.count_documents({"verified": True, "timestamp": {"$gte": today_start, "$lt": today_end}})
+
+    return {
+        "total_all":       total_all,
+        "success_all":     success_all,
+        "failed_all":      total_all - success_all,
+        "today_all":       today_all,
+        "today_success":   today_success,
+        "today_failed":    today_all - today_success,
+        "success_rate":    round(success_all / total_all * 100, 1) if total_all > 0 else 0.0,
+    }

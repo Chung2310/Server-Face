@@ -68,6 +68,9 @@ async def initialize_database() -> None:
         await database.face_registry.create_index("user_id", unique=True)
         await database.face_challenges.create_index("challenge_id", unique=True)
         await database.face_challenges.create_index("expires_at", expireAfterSeconds=0)
+        await database.verification_logs.create_index("user_id")
+        await database.verification_logs.create_index("timestamp")
+        await database.verification_logs.create_index([("user_id", 1), ("timestamp", -1)])
 
         from app.services.admin_auth import ensure_bootstrap_admin
         await ensure_bootstrap_admin(database)

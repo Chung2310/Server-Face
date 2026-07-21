@@ -3,7 +3,7 @@ import logging
 import secrets
 import numpy as np
 from typing import List
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Request
 
 logger = logging.getLogger("uvicorn.error")
 from app.services.face_analysis import FaceAnalysisService
@@ -325,8 +325,27 @@ async def search_face(
     
     return SearchResponse(matches=matches[:request.limit])
 
+async def _write_verification_log(database, user_id: str, result, request) -> None:
+    """Ghi log kết quả xác thực khuôn mặt vào collection verification_logs."""
+    try:
+        ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else None)
+        device_info = request.headers.get("User-Agent", "")[:256]
+        await database.verification_logs.insert_one({
+            "user_id": user_id,
+            "verified": result.verified,
+            "similarity": result.similarity,
+            "reason": result.reason,
+            "timestamp": datetime.now(timezone.utc),
+            "ip_address": ip,
+            "device_info": device_info,
+        })
+    except Exception as e:
+        logger.warning(f"Failed to write verification log for user_id={user_id}: {e}")
+
+
 @router.post("/verify-employee", response_model=VerifyEmployeeResponse)
 async def verify_employee(
+    request: Request,
     user_id: str = Form(..., description="Mã nhân viên cần xác thực"),
     file: UploadFile = File(..., description="Ảnh chụp khuôn mặt để đối sánh"),
     threshold: float = Query(None, description="Ngưỡng xác thực tùy chỉnh (Mặc định: 0.45)")
@@ -340,11 +359,13 @@ async def verify_employee(
     # 1. Tìm kiếm thông tin đăng ký của nhân viên trong MongoDB
     doc = await db.face_registry.find_one({"user_id": user_id})
     if not doc:
-        return VerifyEmployeeResponse(
+        result_response = VerifyEmployeeResponse(
             verified=False,
             reason="Nhân viên chưa đăng ký thông tin khuôn mặt trên hệ thống.",
             similarity=None
         )
+        await _write_verification_log(db, user_id, result_response, request)
+        return result_response
 
     registered_emb = np.array(doc["embedding"], dtype=np.float32)
 
@@ -353,20 +374,24 @@ async def verify_employee(
     try:
         img = decode_image(contents)
     except HTTPException as e:
-        return VerifyEmployeeResponse(
+        result_response = VerifyEmployeeResponse(
             verified=False,
             reason="File ảnh không hợp lệ hoặc bị lỗi định dạng.",
             similarity=None
         )
+        await _write_verification_log(db, user_id, result_response, request)
+        return result_response
 
     # 3. Phát hiện khuôn mặt lớn nhất trong ảnh chụp mới
     face = service.get_largest_face(img)
     if not face:
-        return VerifyEmployeeResponse(
+        result_response = VerifyEmployeeResponse(
             verified=False,
             reason="Không phát hiện thấy khuôn mặt nào trong ảnh chụp.",
             similarity=None
         )
+        await _write_verification_log(db, user_id, result_response, request)
+        return result_response
 
     # 4. Tính toán độ tương đồng giữa khuôn mặt chụp và khuôn mặt đăng ký
     similarity = service.compute_similarity(registered_emb, face.embedding)
@@ -379,11 +404,13 @@ async def verify_employee(
     else:
         reason = f"Xác thực thất bại. Khuôn mặt không khớp với nhân viên đã đăng ký (Độ khớp: {similarity*100:.1f}% < {active_threshold*100:.1f}%)."
 
-    return VerifyEmployeeResponse(
+    result_response = VerifyEmployeeResponse(
         verified=verified,
         reason=reason,
         similarity=similarity
     )
+    await _write_verification_log(db, user_id, result_response, request)
+    return result_response
 @router.post(
     "/verify-employee-secure",
     response_model=SecureVerifyEmployeeResponse,

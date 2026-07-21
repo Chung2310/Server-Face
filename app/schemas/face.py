@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel, Field
 
 class BoundingBox(BaseModel):
@@ -102,3 +102,22 @@ class VideoLivenessVerifyResponse(BaseModel):
     motion_score: float
     reason_code: str
     sampled_frames: int
+
+
+class AttendanceLogEntry(BaseModel):
+    id: str = Field(..., description="Log entry ID")
+    user_id: str = Field(..., description="Employee ID")
+    verified: bool = Field(..., description="Whether verification was successful")
+    similarity: Optional[float] = Field(None, description="Face similarity score")
+    reason: str = Field(..., description="Result reason")
+    timestamp: datetime = Field(..., description="Verification timestamp")
+    ip_address: Optional[str] = Field(None, description="Client IP address")
+    device_info: Optional[str] = Field(None, description="Device/browser info")
+
+
+class AttendanceLogsResponse(BaseModel):
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+    data: List[AttendanceLogEntry]
