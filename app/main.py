@@ -94,6 +94,11 @@ static_dir = os.path.join(os.path.dirname(__file__), "static", "admin")
 if os.path.isdir(static_dir):
     app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
+# Mount video liveness manual test page (dev tool, not for production exposure)
+liveness_test_dir = os.path.join(os.path.dirname(__file__), "static", "liveness_test")
+if os.path.isdir(liveness_test_dir):
+    app.mount("/liveness-test", StaticFiles(directory=liveness_test_dir, html=True), name="liveness-test")
+
 @app.get("/", include_in_schema=False)
 def read_root():
     return RedirectResponse(url="/admin")

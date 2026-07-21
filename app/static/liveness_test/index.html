@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Video Liveness Test</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; min-height: 100vh;
+    background: #0f1115; color: #e6e8eb;
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  .sub { color: #9aa1ab; font-size: 0.85rem; margin-bottom: 20px; }
+  .card {
+    background: #171a21; border: 1px solid #262b35; border-radius: 12px;
+    padding: 18px; margin-bottom: 16px; max-width: 560px;
+  }
+  label { display: block; font-size: 0.8rem; color: #9aa1ab; margin-bottom: 4px; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid #2c3140;
+    background: #0f1115; color: #e6e8eb; font-size: 0.9rem; margin-bottom: 12px;
+  }
+  button {
+    appearance: none; border: none; border-radius: 8px; padding: 10px 16px;
+    background: #3b82f6; color: white; font-size: 0.9rem; font-weight: 600;
+    cursor: pointer; margin-right: 8px; margin-bottom: 8px;
+  }
+  button:disabled { background: #2c3140; color: #6b7280; cursor: not-allowed; }
+  button.secondary { background: #262b35; }
+  button.danger { background: #ef4444; }
+  video { width: 100%; max-width: 480px; border-radius: 10px; background: #000; display: block; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .action-badge {
+    display: inline-block; padding: 6px 14px; border-radius: 999px;
+    background: #1d2530; border: 1px solid #2c3140; font-weight: 700;
+    font-size: 1rem; letter-spacing: 0.02em; margin-bottom: 12px;
+  }
+  .status { font-size: 0.85rem; margin: 8px 0; color: #9aa1ab; }
+  .countdown {
+    font-size: 2.4rem; font-weight: 800; color: #ef4444; margin: 4px 0;
+  }
+  pre {
+    background: #0b0d11; border: 1px solid #262b35; border-radius: 8px;
+    padding: 12px; font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap;
+  }
+  .verified-true { color: #22c55e; font-weight: 700; }
+  .verified-false { color: #ef4444; font-weight: 700; }
+  .hint { font-size: 0.78rem; color: #6b7280; margin-top: -6px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+  <h1>Video Liveness Challenge — Test Page</h1>
+  <div class="sub">Dev-only tool to exercise /liveness/challenges and /liveness/verify-video against this running service.</div>
+
+  <div class="card">
+    <label for="apiBase">API base URL</label>
+    <input type="text" id="apiBase" />
+    <label for="apiKey">X-API-Key</label>
+    <input type="password" id="apiKey" placeholder="FACE_API_KEY value" />
+    <div class="hint">Stored only in this browser's localStorage.</div>
+    <button id="btnCamera">Enable camera</button>
+    <button id="btnChallenge" class="secondary">1. Get challenge</button>
+  </div>
+
+  <div class="card" id="recordCard" style="display:none;">
+    <div id="actionBadge" class="action-badge">—</div>
+    <div id="challengeMeta" class="status"></div>
+    <video id="preview" autoplay muted playsinline></video>
+    <div class="row" style="margin-top:12px;">
+      <button id="btnRecord">2. Record (4s)</button>
+      <button id="btnSubmit" class="secondary" disabled>3. Submit for verification</button>
+    </div>
+    <div id="countdown" class="countdown"></div>
+    <div id="recordStatus" class="status"></div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none;">
+    <div id="resultSummary"></div>
+    <pre id="resultJson"></pre>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const RECORD_SECONDS = 4;
+
+const apiBaseInput = $("apiBase");
+const apiKeyInput = $("apiKey");
+apiBaseInput.value = localStorage.getItem("liveness_test_api_base") || window.location.origin;
+apiKeyInput.value = localStorage.getItem("liveness_test_api_key") || "";
+apiBaseInput.addEventListener("change", () => localStorage.setItem("liveness_test_api_base", apiBaseInput.value.trim()));
+apiKeyInput.addEventListener("change", () => localStorage.setItem("liveness_test_api_key", apiKeyInput.value));
+
+function apiBase() { return (apiBaseInput.value || window.location.origin).replace(/\/+$/, ""); }
+function apiKey() { return apiKeyInput.value.trim(); }
+
+let stream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordedBlob = null;
+let currentChallengeId = null;
+let mimeType = "video/webm";
+
+$("btnCamera").addEventListener("click", async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+    $("preview").srcObject = stream;
+    $("btnCamera").textContent = "Camera enabled";
+    $("btnCamera").disabled = true;
+  } catch (err) {
+    alert("Could not access camera: " + err.message);
+  }
+});
+
+$("btnChallenge").addEventListener("click", async () => {
+  $("resultCard").style.display = "none";
+  try {
+    const res = await fetch(`${apiBase()}/api/v1/face/liveness/challenges`, {
+      method: "POST",
+      headers: { "X-API-Key": apiKey() },
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      alert("Failed to get challenge: " + JSON.stringify(body));
+      return;
+    }
+    currentChallengeId = body.challenge_id;
+    const label = { turn_left: "Turn head LEFT", turn_right: "Turn head RIGHT", blink: "Blink" }[body.action] || body.action;
+    $("actionBadge").textContent = label;
+    $("challengeMeta").textContent = `challenge_id: ${body.challenge_id} · expires in ${body.expires_in_seconds}s`;
+    $("recordCard").style.display = "block";
+    $("btnSubmit").disabled = true;
+    $("recordStatus").textContent = "";
+    $("preview").srcObject = stream;
+    recordedBlob = null;
+  } catch (err) {
+    alert("Request failed: " + err.message);
+  }
+});
+
+$("btnRecord").addEventListener("click", () => {
+  if (!stream) {
+    alert("Enable the camera first.");
+    return;
+  }
+  if (!currentChallengeId) {
+    alert("Get a challenge first.");
+    return;
+  }
+  const candidates = ["video/webm;codecs=vp8", "video/webm", "video/mp4"];
+  mimeType = candidates.find((c) => MediaRecorder.isTypeSupported(c)) || "";
+  recordedChunks = [];
+  mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    recordedBlob = new Blob(recordedChunks, { type: mimeType || "video/webm" });
+    $("preview").srcObject = null;
+    $("preview").src = URL.createObjectURL(recordedBlob);
+    $("preview").muted = true;
+    $("preview").controls = true;
+    $("preview").play();
+    $("btnSubmit").disabled = false;
+    $("recordStatus").textContent = `Recorded ${(recordedBlob.size / 1024).toFixed(1)} KB`;
+  };
+
+  $("btnRecord").disabled = true;
+  mediaRecorder.start();
+  let remaining = RECORD_SECONDS;
+  $("countdown").textContent = remaining;
+  const timer = setInterval(() => {
+    remaining -= 1;
+    $("countdown").textContent = remaining > 0 ? remaining : "";
+    if (remaining <= 0) {
+      clearInterval(timer);
+      mediaRecorder.stop();
+      $("btnRecord").disabled = false;
+    }
+  }, 1000);
+});
+
+$("btnSubmit").addEventListener("click", async () => {
+  if (!recordedBlob || !currentChallengeId) return;
+  $("btnSubmit").disabled = true;
+  $("recordStatus").textContent = "Uploading and analyzing...";
+  const ext = (mimeType || "").includes("mp4") ? "mp4" : "webm";
+  const form = new FormData();
+  form.append("challenge_id", currentChallengeId);
+  form.append("file", recordedBlob, `capture.${ext}`);
+
+  try {
+    const res = await fetch(`${apiBase()}/api/v1/face/liveness/verify-video`, {
+      method: "POST",
+      headers: { "X-API-Key": apiKey() },
+      body: form,
+    });
+    const body = await res.json();
+    $("resultCard").style.display = "block";
+    const verified = body.verified === true;
+    $("resultSummary").innerHTML = res.ok
+      ? `<span class="${verified ? "verified-true" : "verified-false"}">${verified ? "VERIFIED" : "NOT VERIFIED"}</span> — HTTP ${res.status}`
+      : `<span class="verified-false">ERROR</span> — HTTP ${res.status}`;
+    $("resultJson").textContent = JSON.stringify(body, null, 2);
+    $("recordStatus").textContent = "";
+    currentChallengeId = null;
+  } catch (err) {
+    $("recordStatus").textContent = "";
+    alert("Verification request failed: " + err.message);
+    $("btnSubmit").disabled = false;
+  }
+});
+</script>
+</body>
+</html>
