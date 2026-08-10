@@ -45,7 +45,7 @@ def require_database():
     """Dependency-style guard: return the db or raise HTTP 503."""
     database = get_db()
     if database is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
+        raise HTTPException(status_code=503, detail="Cơ sở dữ liệu hiện không khả dụng. Vui lòng thử lại sau.")
     return database
 
 

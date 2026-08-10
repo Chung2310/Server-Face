@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from app.config import settings
-from tests.shared_state import fake_db, mock_service
+from tests.shared_state import fake_db, mock_service, sample_image
 
 API_KEY_HEADER = {"X-API-Key": "test-api-key"}
 
@@ -96,7 +96,7 @@ def test_invalid_image_rejected(client):
 
 def test_no_face_image_rejected(client):
     mock_service.detect_faces.return_value = []
-    with patch("app.routers.face.decode_image", return_value=np.zeros((10, 10, 3), dtype=np.uint8)):
+    with patch("app.routers.face.decode_image", return_value=sample_image()):
         res = _register(client)
     assert res.status_code == 400
     assert res.json()["detail"] == {"reason_code": "no_face"}
@@ -106,7 +106,7 @@ def test_multi_face_image_rejected(client):
     face = MagicMock()
     face.embedding = np.zeros(512, dtype=np.float32)
     mock_service.detect_faces.return_value = [face, face]
-    with patch("app.routers.face.decode_image", return_value=np.zeros((10, 10, 3), dtype=np.uint8)):
+    with patch("app.routers.face.decode_image", return_value=sample_image()):
         res = _register(client)
     assert res.status_code == 400
     assert res.json()["detail"] == {"reason_code": "multiple_faces"}

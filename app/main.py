@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from app.config import settings
-from app.routers import face, health, admin
+from app.routers import face, health, admin, stream
 from app.services.face_analysis import FaceAnalysisService
 
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +24,22 @@ async def lifespan(app: FastAPI):
         logger.error(f"Critical error on startup loading models: {e}")
     from app.database import initialize_database
     await initialize_database()
-    yield
+
+    # Warm the 1:N index so the first identification does not pay for a full
+    # registry load. A failure here is non-fatal: it reloads lazily on demand.
+    from app.services.face_index import FaceIndex
+    try:
+        await FaceIndex().refresh()
+    except Exception as e:
+        logger.error(f"Failed to warm face index: {type(e).__name__}")
+
+    from app.services.erp_bridge import ErpBridge
+    bridge = ErpBridge()
+    await bridge.start()
+    try:
+        yield
+    finally:
+        await bridge.stop()
 
 # Setup FastAPI App
 app = FastAPI(
@@ -88,6 +103,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(health.router, prefix=settings.API_PREFIX)
 app.include_router(face.router, prefix=settings.API_PREFIX)
 app.include_router(admin.router, prefix=settings.API_PREFIX)
+app.include_router(stream.router, prefix=settings.API_PREFIX)
 
 # Mount Admin Panel static files
 static_dir = os.path.join(os.path.dirname(__file__), "static", "admin")
@@ -98,6 +114,10 @@ if os.path.isdir(static_dir):
 liveness_test_dir = os.path.join(os.path.dirname(__file__), "static", "liveness_test")
 if os.path.isdir(liveness_test_dir):
     app.mount("/liveness-test", StaticFiles(directory=liveness_test_dir, html=True), name="liveness-test")
+
+stream_test_dir = os.path.join(os.path.dirname(__file__), "static", "stream_test")
+if os.path.isdir(stream_test_dir):
+    app.mount("/stream-test", StaticFiles(directory=stream_test_dir, html=True), name="stream-test")
 
 @app.get("/", include_in_schema=False)
 def read_root():

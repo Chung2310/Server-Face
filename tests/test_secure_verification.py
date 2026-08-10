@@ -6,7 +6,7 @@ import pytest
 
 from app.config import settings
 from app.services.liveness import LivenessResult, LivenessUnavailableError
-from tests.shared_state import fake_db, mock_service
+from tests.shared_state import fake_db, mock_service, sample_image
 
 
 API_KEY_HEADER = {"X-API-Key": "test-api-key"}
@@ -93,7 +93,7 @@ def test_secure_verification_requires_exactly_one_face(
     mock_service.detect_faces.return_value = faces
     with patch(
         "app.routers.face.decode_image",
-        return_value=np.zeros((100, 100, 3), dtype=np.uint8),
+        return_value=sample_image(),
     ):
         response = _post(client)
 
@@ -110,7 +110,7 @@ def test_secure_verification_fails_closed_when_liveness_is_unavailable(
     liveness.analyze.side_effect = LivenessUnavailableError("unavailable")
     with patch(
         "app.routers.face.decode_image",
-        return_value=np.zeros((100, 100, 3), dtype=np.uint8),
+        return_value=sample_image(),
     ):
         response = _post(client)
 
@@ -131,7 +131,7 @@ def test_secure_verification_rejects_spoof_before_face_comparison(client, livene
     liveness.analyze.return_value = LivenessResult(False, 0.2, 0.8)
     with patch(
         "app.routers.face.decode_image",
-        return_value=np.zeros((100, 100, 3), dtype=np.uint8),
+        return_value=sample_image(),
     ):
         response = _post(client)
 
@@ -152,7 +152,7 @@ def test_secure_verification_reports_face_mismatch(client, liveness):
     mock_service.compute_similarity.return_value = 0.1
     with patch(
         "app.routers.face.decode_image",
-        return_value=np.zeros((100, 100, 3), dtype=np.uint8),
+        return_value=sample_image(),
     ):
         response = _post(client)
 
@@ -171,7 +171,7 @@ def test_secure_verification_reports_verified(client, liveness):
     mock_service.compute_similarity.return_value = 0.91
     with patch(
         "app.routers.face.decode_image",
-        return_value=np.zeros((100, 100, 3), dtype=np.uint8),
+        return_value=sample_image(),
     ):
         response = _post(client)
 
@@ -195,7 +195,7 @@ def test_register_rejects_spoof_and_preserves_existing_embedding(client, livenes
     liveness.analyze.return_value = LivenessResult(False, 0.1, 0.8)
     with patch(
         "app.routers.face.decode_image",
-        return_value=np.zeros((100, 100, 3), dtype=np.uint8),
+        return_value=sample_image(),
     ):
         response = client.post(
             "/api/v1/face/register",
@@ -214,7 +214,7 @@ def test_registration_logs_liveness_unavailable_with_traceback(client, liveness,
     liveness.analyze.side_effect = LivenessUnavailableError("inference failed")
     with patch(
         "app.routers.face.decode_image",
-        return_value=np.zeros((100, 100, 3), dtype=np.uint8),
+        return_value=sample_image(),
     ):
         response = client.post(
             "/api/v1/face/register",

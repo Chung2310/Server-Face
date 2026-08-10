@@ -127,18 +127,18 @@ async def get_current_admin(request: Request) -> str:
     db = require_database()
     token = request.cookies.get(settings.ADMIN_SESSION_COOKIE)
     if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise HTTPException(status_code=401, detail="Chưa đăng nhập. Vui lòng đăng nhập để tiếp tục.")
 
     session = await db.admin_sessions.find_one({"token_hash": hash_token(token)})
     if session is None:
-        raise HTTPException(status_code=401, detail="Invalid session")
+        raise HTTPException(status_code=401, detail="Phiên đăng nhập không hợp lệ hoặc đã bị thu hồi.")
 
     if _as_utc(session["expires_at"]) <= _utcnow():
         await db.admin_sessions.delete_one({"token_hash": session["token_hash"]})
-        raise HTTPException(status_code=401, detail="Session expired")
+        raise HTTPException(status_code=401, detail="Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.")
 
     admin = await db.admins.find_one({"username": session["username"]})
     if admin is None or not admin.get("active", False):
-        raise HTTPException(status_code=401, detail="Invalid session")
+        raise HTTPException(status_code=401, detail="Tài khoản quản trị không tồn tại hoặc đã bị vô hiệu hóa.")
 
     return session["username"]

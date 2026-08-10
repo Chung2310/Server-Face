@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nhận diện liên tục — Test Page</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; min-height: 100vh;
+    background: #0f1115; color: #e6e8eb;
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  .sub { color: #9aa1ab; font-size: 0.85rem; margin-bottom: 20px; }
+  .card {
+    background: #171a21; border: 1px solid #262b35; border-radius: 12px;
+    padding: 18px; margin-bottom: 16px; max-width: 560px;
+  }
+  label { display: block; font-size: 0.8rem; color: #9aa1ab; margin-bottom: 4px; }
+  input[type=text], input[type=password], input[type=number] {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid #2c3140;
+    background: #0f1115; color: #e6e8eb; font-size: 0.9rem; margin-bottom: 12px;
+  }
+  button {
+    appearance: none; border: none; border-radius: 8px; padding: 10px 16px;
+    background: #3b82f6; color: white; font-size: 0.9rem; font-weight: 600;
+    cursor: pointer; margin-right: 8px; margin-bottom: 8px;
+  }
+  button:disabled { background: #2c3140; color: #6b7280; cursor: not-allowed; }
+  button.danger { background: #ef4444; }
+  video { width: 100%; max-width: 480px; border-radius: 10px; background: #000; display: block; }
+  .status { font-size: 0.85rem; margin: 8px 0; color: #9aa1ab; }
+  .identity { font-size: 2rem; font-weight: 800; margin: 6px 0 2px; }
+  .meta { font-size: 0.85rem; color: #9aa1ab; }
+  .s-identified { color: #22c55e; }
+  .s-unknown, .s-empty_registry { color: #9aa1ab; }
+  .s-ambiguous, .s-low_quality { color: #f59e0b; }
+  .s-spoof, .s-error { color: #ef4444; }
+  .s-no_face { color: #4b5563; }
+  .committed {
+    display: inline-block; padding: 4px 12px; border-radius: 999px;
+    background: #14321f; border: 1px solid #22c55e; color: #22c55e;
+    font-size: 0.75rem; font-weight: 700; margin-left: 8px; vertical-align: middle;
+  }
+  pre {
+    background: #0b0d11; border: 1px solid #262b35; border-radius: 8px;
+    padding: 12px; font-size: 0.78rem; overflow-x: auto; white-space: pre-wrap;
+    max-height: 260px;
+  }
+  .hint { font-size: 0.78rem; color: #6b7280; margin-top: -6px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+  <h1>Nhận diện liên tục 1:N — Test Page</h1>
+  <div class="sub">
+    Công cụ dev để thử <code>WS /api/v1/face/stream</code>. Không cần nhập mã nhân viên —
+    hệ thống tự xác định danh tính từ toàn bộ registry.
+  </div>
+
+  <div class="card">
+    <label for="wsBase">WebSocket URL</label>
+    <input type="text" id="wsBase" />
+    <label for="apiKey">X-API-Key</label>
+    <input type="password" id="apiKey" placeholder="FACE_API_KEY" />
+    <div class="hint">Trình duyệt không đặt được header khi bắt tay WebSocket, nên key được gửi qua subprotocol <code>apikey.&lt;key&gt;</code>.</div>
+    <label for="fps">Số frame gửi mỗi giây</label>
+    <input type="number" id="fps" value="5" min="1" max="15" />
+    <div class="hint">Gửi nhanh hơn không giúp nhanh hơn — server bỏ frame khi đang bận và chỉ giữ frame mới nhất.</div>
+    <button id="startBtn">Bắt đầu</button>
+    <button id="stopBtn" class="danger" disabled>Dừng</button>
+    <div class="status" id="connStatus">Chưa kết nối.</div>
+  </div>
+
+  <div class="card">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="identity" id="identity">—</div>
+    <div class="meta" id="meta">Chưa có frame nào.</div>
+  </div>
+
+  <div class="card">
+    <label>Sự kiện đã chốt (committed)</label>
+    <pre id="events">(chưa có)</pre>
+  </div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const wsBase = $("wsBase"), apiKey = $("apiKey"), fps = $("fps");
+  const startBtn = $("startBtn"), stopBtn = $("stopBtn");
+  const connStatus = $("connStatus"), identity = $("identity"), meta = $("meta");
+  const events = $("events"), video = $("video");
+
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  wsBase.value = `${scheme}//${location.host}/api/v1/face/stream`;
+
+  let socket = null, stream = null, timer = null;
+  const canvas = document.createElement("canvas");
+  const committed = [];
+
+  const LABELS = {
+    identified: "Đã nhận diện",
+    unknown: "Không nhận ra",
+    ambiguous: "Không chắc chắn",
+    no_face: "Không thấy khuôn mặt",
+    low_quality: "Ảnh chưa đủ rõ",
+    spoof: "Nghi ngờ giả mạo",
+    empty_registry: "Registry trống",
+    error: "Lỗi",
+  };
+
+  function render(msg) {
+    const status = msg.status || "error";
+    identity.className = "identity s-" + status;
+    if (status === "identified") {
+      identity.innerHTML = msg.user_id + (msg.committed ? '<span class="committed">CHỐT</span>' : "");
+    } else {
+      identity.textContent = LABELS[status] || status;
+    }
+
+    const parts = [];
+    if (msg.similarity != null) parts.push("similarity " + msg.similarity.toFixed(4));
+    if (msg.margin != null) parts.push("margin " + msg.margin.toFixed(4));
+    if (msg.threshold != null) parts.push("ngưỡng " + msg.threshold);
+    if (msg.live != null) parts.push("liveness " + (msg.live ? "thật" : "giả"));
+    if (msg.reason) parts.push("lý do: " + msg.reason);
+    parts.push("frame #" + (msg.frame_id ?? "-"));
+    meta.textContent = parts.join(" · ");
+
+    if (msg.committed) {
+      committed.unshift(new Date().toLocaleTimeString() + "  " + msg.user_id +
+        "  (similarity " + Number(msg.similarity).toFixed(4) + ", liveness " + msg.live + ")");
+      events.textContent = committed.slice(0, 20).join("\n");
+    }
+  }
+
+  async function sendFrame() {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    // Skip while the socket is still flushing - no point piling frames into it.
+    if (socket.bufferedAmount > 0) return;
+    if (!video.videoWidth) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.8));
+    if (blob && socket.readyState === WebSocket.OPEN) {
+      socket.send(await blob.arrayBuffer());
+    }
+  }
+
+  async function start() {
+    if (!apiKey.value.trim()) {
+      connStatus.textContent = "Cần nhập X-API-Key.";
+      return;
+    }
+    startBtn.disabled = true;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+      video.srcObject = stream;
+    } catch (e) {
+      connStatus.textContent = "Không mở được webcam: " + e.message;
+      startBtn.disabled = false;
+      return;
+    }
+
+    socket = new WebSocket(wsBase.value.trim(), ["apikey." + apiKey.value.trim()]);
+    socket.binaryType = "arraybuffer";
+
+    socket.onopen = () => {
+      connStatus.textContent = "Đã kết nối. Đang gửi frame…";
+      stopBtn.disabled = false;
+      timer = setInterval(sendFrame, Math.round(1000 / Math.max(1, Number(fps.value) || 5)));
+    };
+    socket.onmessage = (event) => {
+      try { render(JSON.parse(event.data)); } catch (_) { /* ignore malformed */ }
+    };
+    socket.onclose = (event) => {
+      connStatus.textContent = event.code === 4401
+        ? "Bị từ chối: sai hoặc thiếu API key (4401)."
+        : "Kết nối đã đóng (code " + event.code + ").";
+      cleanup();
+    };
+    socket.onerror = () => { connStatus.textContent = "Lỗi kết nối WebSocket."; };
+  }
+
+  function cleanup() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+    video.srcObject = null;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+
+  function stop() {
+    if (socket && socket.readyState === WebSocket.OPEN) socket.close(1000);
+    socket = null;
+    cleanup();
+    connStatus.textContent = "Đã dừng.";
+  }
+
+  startBtn.addEventListener("click", start);
+  stopBtn.addEventListener("click", stop);
+  window.addEventListener("beforeunload", stop);
+})();
+</script>
+</body>
+</html>

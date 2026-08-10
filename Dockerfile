@@ -37,11 +37,20 @@ WORKDIR /app
 # Copy isolated virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
 
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Bake the model pack into the image instead of downloading it on first request.
+# Must match MODEL_NAME at runtime; buffalo_l is larger (~330MB) but noticeably
+# more accurate than buffalo_s, especially at the low false-accept rates that
+# 1:N identification needs.
+ARG MODEL_NAME=buffalo_l
+RUN python -c "from insightface.app import FaceAnalysis; \
+    FaceAnalysis(name='${MODEL_NAME}').prepare(ctx_id=-1)"
+
 # Copy codebase
 COPY . .
 
 # Environment variables setup
-ENV PATH="/opt/venv/bin:$PATH"
 ENV PORT=8000
 ENV PYTHONUNBUFFERED=1
 

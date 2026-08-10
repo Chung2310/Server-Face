@@ -9,6 +9,8 @@ logger = logging.getLogger("uvicorn.error")
 from app.services.face_analysis import FaceAnalysisService
 from app.services.liveness import LivenessService, LivenessUnavailableError
 from app.services.video_liveness import VideoLivenessService, VideoLivenessError
+from app.services.face_index import FaceIndex, normalize
+from app.services import face_quality
 from app.schemas.face import (
     FaceDetectionResponse, BoundingBox, FaceLandmark,
     FaceEmbeddingResponse, VerifyEmbeddingsRequest, VerifyResponse,
@@ -184,13 +186,12 @@ async def verify_embeddings(
 
 # ── Shared registry operations (used by API-key and admin session routes) ──
 
-async def register_face_from_image(user_id: str, contents: bytes) -> RegisterFaceResponse:
-    """Detect exactly one face in the image and upsert its embedding.
+def extract_enrollment_face(user_id: str, contents: bytes):
+    """Decode one enrollment image and return (image, face, quality report).
 
-    Preserves created_at on re-registration via $setOnInsert.
+    Enforces exactly one face, the quality gate, and passive liveness. Shared by
+    single-image and multi-image registration so both apply identical rules.
     """
-    logger.info(f"Start face registration from image for user_id: {user_id} ({len(contents)} bytes)")
-    database = require_database()
     try:
         img = decode_image(contents)
     except HTTPException as exc:
@@ -205,6 +206,15 @@ async def register_face_from_image(user_id: str, contents: bytes) -> RegisterFac
         raise reason_error(400, "multiple_faces")
 
     face = faces[0]
+
+    quality = face_quality.assess(img, face)
+    if settings.QUALITY_GATE_ENABLED and not quality.acceptable:
+        logger.warning(
+            f"Registration failed for user_id: {user_id} - {quality.reason_code} "
+            f"({quality.as_dict()})"
+        )
+        raise reason_error(400, quality.reason_code)
+
     try:
         liveness = get_liveness_service().analyze(img, face.bbox)
     except LivenessUnavailableError as exc:
@@ -217,18 +227,111 @@ async def register_face_from_image(user_id: str, contents: bytes) -> RegisterFac
         logger.warning(f"Registration failed for user_id: {user_id} - spoof_detected (score: {liveness.score:.4f}, threshold: {liveness.threshold})")
         raise reason_error(400, "spoof_detected")
 
+    return img, face, quality
+
+
+async def register_face_from_image(user_id: str, contents: bytes) -> RegisterFaceResponse:
+    """Detect exactly one face in the image and upsert its embedding.
+
+    Preserves created_at on re-registration via $setOnInsert.
+    """
+    logger.info(f"Start face registration from image for user_id: {user_id} ({len(contents)} bytes)")
+    _, face, quality = extract_enrollment_face(user_id, contents)
+    return await _store_templates(user_id, [(face, quality)], [contents])
+
+
+async def register_faces_from_images(user_id: str, images: List[bytes]) -> RegisterFaceResponse:
+    """Enrol a user from several images and store their averaged template.
+
+    One photo captures one pose under one light. Averaging several unit-norm
+    embeddings gives a centroid that sits closer to the identity's true centre,
+    which is the cheapest accuracy win available after the model itself.
+
+    Every image must pass the gate: silently dropping bad ones would let a user
+    believe they enrolled with five angles when only two were kept.
+    """
+    logger.info(f"Start multi-image registration for user_id: {user_id} ({len(images)} images)")
+    extracted = [extract_enrollment_face(user_id, contents) for contents in images]
+    return await _store_templates(
+        user_id, [(face, quality) for _, face, quality in extracted], images
+    )
+
+
+async def _store_enrollment_images(database, user_id: str, images: List[bytes]) -> List[str]:
+    """Persist source images in GridFS when retention is enabled.
+
+    Only useful for regenerating embeddings after a model change. Failures here
+    must never block a registration that already succeeded.
+    """
+    if not settings.STORE_ENROLLMENT_IMAGES or not images:
+        return []
+    try:
+        from motor.motor_asyncio import AsyncIOMotorGridFSBucket
+
+        bucket = AsyncIOMotorGridFSBucket(database, bucket_name="enrollment_images")
+        # Drop this user's previous images - only the current enrollment matters.
+        async for old in bucket.find({"metadata.user_id": user_id}):
+            await bucket.delete(old._id)
+
+        stored = []
+        now = datetime.now(timezone.utc)
+        for index, content in enumerate(images):
+            file_id = await bucket.upload_from_stream(
+                f"{user_id}_{index}",
+                content,
+                metadata={"user_id": user_id, "index": index, "stored_at": now},
+            )
+            stored.append(str(file_id))
+        return stored
+    except Exception as e:
+        logger.warning(f"Failed to store enrollment images for user_id={user_id}: {type(e).__name__}")
+        return []
+
+
+async def _store_templates(user_id: str, pairs, images: List[bytes]) -> RegisterFaceResponse:
+    """Upsert templates plus their centroid. Preserves created_at via $setOnInsert."""
+    database = require_database()
     now = datetime.now(timezone.utc)
+
+    # Stored unit-norm so 1:N matching is a plain dot product against the index.
+    vectors = [normalize(face.embedding) for face, _ in pairs]
+    centroid = normalize(np.mean(np.stack(vectors), axis=0))
+
+    templates = [
+        {
+            "embedding": vector.tolist(),
+            "quality": quality.as_dict(),
+            "created_at": now,
+        }
+        for vector, (_, quality) in zip(vectors, pairs)
+    ]
+
+    image_ids = await _store_enrollment_images(database, user_id, images)
+
     result = await database.face_registry.update_one(
         {"user_id": user_id},
         {
-            "$set": {"embedding": face.embedding.tolist(), "updated_at": now},
+            "$set": {
+                "embedding": centroid.tolist(),
+                "templates": templates,
+                "image_ids": image_ids,
+                "template_count": len(templates),
+                # Embeddings from different model packs are not comparable; this
+                # records which pack produced them so stale rows are detectable.
+                "model_name": settings.MODEL_NAME,
+                "updated_at": now,
+            },
             "$setOnInsert": {"user_id": user_id, "created_at": now},
         },
         upsert=True,
     )
+    FaceIndex().invalidate()
     doc = await database.face_registry.find_one({"user_id": user_id})
     created = getattr(result, "upserted_id", None) is not None
-    logger.info(f"Successfully registered face for user_id: {user_id} | Created: {created}")
+    logger.info(
+        f"Successfully registered face for user_id: {user_id} | "
+        f"Created: {created} | Templates: {len(templates)}"
+    )
     return RegisterFaceResponse(
         user_id=user_id,
         created=created,
@@ -251,6 +354,7 @@ async def get_registration_status(user_id: str) -> RegistrationStatusResponse:
 async def delete_registration(user_id: str) -> DeleteRegistrationResponse:
     database = require_database()
     result = await database.face_registry.delete_one({"user_id": user_id})
+    FaceIndex().invalidate()
     return DeleteRegistrationResponse(user_id=user_id, deleted=result.deleted_count > 0)
 
 async def list_registrations() -> List[FaceRegistrationInfo]:
@@ -280,6 +384,33 @@ async def register_face(
     contents = await file.read()
     return await register_face_from_image(user_id, contents)
 
+@router.post(
+    "/register-multi",
+    response_model=RegisterFaceResponse,
+    dependencies=[Depends(require_face_api_key)],
+)
+async def register_face_multi(
+    user_id: str = Form(..., description="Unique employee identifier"),
+    files: List[UploadFile] = File(
+        ...,
+        description="2-5 images of the same person from different angles "
+                    "(frontal, slight left, slight right, smiling)",
+    ),
+):
+    """
+    Registers a user from several images, storing the averaged template.
+
+    More robust than single-image registration: one unlucky photo no longer
+    determines recognition quality for that employee forever. Requires the
+    X-API-Key header. Embeddings are never returned.
+    """
+    if not 2 <= len(files) <= 5:
+        raise reason_error(400, "invalid_image_count")
+
+    contents = [await file.read() for file in files]
+    return await register_faces_from_images(user_id, contents)
+
+
 @router.get("/register/{user_id}", response_model=RegistrationStatusResponse, dependencies=[Depends(require_face_api_key)])
 async def registration_status(user_id: str):
     """
@@ -301,28 +432,27 @@ async def search_face(
 ):
     """
     Searches the MongoDB registry for matching faces using the query embedding.
+
+    Scored against the in-memory face index rather than by streaming the registry
+    out of MongoDB on every call.
     """
     query_emb = np.array(request.embedding, dtype=np.float32)
     if query_emb.shape != (512,):
         raise HTTPException(status_code=400, detail="Query embedding must be a 512-dimensional vector")
-        
+
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection not available")
 
     active_threshold = threshold if threshold is not None else settings.SIMILARITY_THRESHOLD
-    matches = []
-    
-    # Query all records from MongoDB face_registry
-    cursor = db.face_registry.find({}, {"user_id": 1, "embedding": 1})
-    async for doc in cursor:
-        reg_emb = np.array(doc["embedding"], dtype=np.float32)
-        sim = service.compute_similarity(query_emb, reg_emb)
-        if sim >= active_threshold:
-            matches.append(SearchMatch(user_id=doc["user_id"], similarity=sim))
-            
-    # Sort matches by similarity descending
-    matches.sort(key=lambda x: x.similarity, reverse=True)
-    
+
+    index = FaceIndex()
+    await index.ensure_loaded()
+    matches = [
+        SearchMatch(user_id=match.user_id, similarity=match.similarity)
+        for match in index.search(query_emb, top_k=max(request.limit, 1))
+        if match.similarity >= active_threshold
+    ]
+
     return SearchResponse(matches=matches[:request.limit])
 
 async def _write_verification_log(database, user_id: str, result, request) -> None:
@@ -393,12 +523,35 @@ async def verify_employee(
         await _write_verification_log(db, user_id, result_response, request)
         return result_response
 
-    # 4. Tính toán độ tương đồng giữa khuôn mặt chụp và khuôn mặt đăng ký
+    # 4. Kiểm tra chống giả mạo (ảnh in, màn hình). Đặt sau cờ cấu hình để các
+    #    client đang tích hợp không bị gãy khi bật lần đầu.
+    if settings.REQUIRE_LIVENESS_ON_VERIFY:
+        try:
+            liveness = get_liveness_service().analyze(img, face.bbox)
+        except LivenessUnavailableError:
+            logger.exception("Liveness model unavailable during verification for user_id: %s", user_id)
+            result_response = VerifyEmployeeResponse(
+                verified=False,
+                reason="Dịch vụ kiểm tra chống giả mạo hiện không khả dụng. Vui lòng thử lại sau.",
+                similarity=None,
+            )
+            await _write_verification_log(db, user_id, result_response, request)
+            return result_response
+        if not liveness.live:
+            result_response = VerifyEmployeeResponse(
+                verified=False,
+                reason="Phát hiện dấu hiệu giả mạo. Vui lòng chụp trực tiếp khuôn mặt thật.",
+                similarity=None,
+            )
+            await _write_verification_log(db, user_id, result_response, request)
+            return result_response
+
+    # 5. Tính toán độ tương đồng giữa khuôn mặt chụp và khuôn mặt đăng ký
     similarity = service.compute_similarity(registered_emb, face.embedding)
     active_threshold = threshold if threshold is not None else settings.SIMILARITY_THRESHOLD
     verified = similarity >= active_threshold
 
-    # 5. Trả về kết quả
+    # 6. Trả về kết quả
     if verified:
         reason = "Xác thực khuôn mặt thành công."
     else:

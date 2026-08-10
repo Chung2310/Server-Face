@@ -15,7 +15,7 @@ import app.services.face_analysis  # noqa: F401  (ensure module exists before pa
 from app.services.liveness import LivenessResult  # noqa: E402
 import app.database  # noqa: F401
 
-from tests.shared_state import fake_db, mock_liveness, mock_service
+from tests.shared_state import fake_db, mock_liveness, mock_service, sample_image
 
 _patchers = [
     patch("app.services.face_analysis.FaceAnalysisService.__new__", return_value=mock_service),
@@ -65,7 +65,7 @@ def one_face():
     face = _make_face()
     mock_service.detect_faces.return_value = [face]
     mock_service.get_largest_face.return_value = face
-    with patch("app.routers.face.decode_image", return_value=np.zeros((100, 100, 3), dtype=np.uint8)):
+    with patch("app.routers.face.decode_image", return_value=sample_image()):
         yield face
 
 
