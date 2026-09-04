@@ -32,6 +32,23 @@
   button.secondary { background: #262b35; }
   button.danger { background: #ef4444; }
   video { width: 100%; max-width: 480px; border-radius: 10px; background: #000; display: block; }
+  .preview-wrap {
+    position: relative; width: 100%; max-width: 480px; overflow: hidden;
+    border-radius: 10px; background: #000;
+  }
+  .preview-wrap video { width: 100%; max-width: none; border-radius: 0; }
+  #faceOverlay {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  .face-status {
+    margin: 10px 0 2px; padding: 8px 10px; border-radius: 8px;
+    background: #11151c; border: 1px solid #2c3140; color: #9aa1ab;
+    font-size: 0.85rem;
+  }
+  .face-status.ready { color: #22c55e; border-color: #166534; background: #102419; }
+  .face-status.warn { color: #f59e0b; border-color: #92400e; background: #251a0a; }
+  .face-status.error { color: #ef4444; border-color: #991b1b; background: #2a1111; }
   .row { display: flex; gap: 16px; flex-wrap: wrap; }
   .action-badge {
     display: inline-block; padding: 6px 14px; border-radius: 999px;
@@ -68,9 +85,13 @@
   <div class="card" id="recordCard" style="display:none;">
     <div id="actionBadge" class="action-badge">—</div>
     <div id="challengeMeta" class="status"></div>
-    <video id="preview" autoplay muted playsinline></video>
+    <div class="preview-wrap">
+      <video id="preview" autoplay muted playsinline></video>
+      <canvas id="faceOverlay"></canvas>
+    </div>
+    <div id="faceStatus" class="face-status" aria-live="polite">Bật camera để tự động phát hiện khuôn mặt.</div>
     <div class="row" style="margin-top:12px;">
-      <button id="btnRecord">2. Record (4s)</button>
+      <button id="btnRecord" disabled>2. Record (4s)</button>
       <button id="btnSubmit" class="secondary" disabled>3. Submit for verification</button>
     </div>
     <div id="countdown" class="countdown"></div>
@@ -85,6 +106,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const RECORD_SECONDS = 4;
+const DETECT_INTERVAL_MS = 700;
 
 const apiBaseInput = $("apiBase");
 const apiKeyInput = $("apiKey");
@@ -102,15 +124,135 @@ let recordedChunks = [];
 let recordedBlob = null;
 let currentChallengeId = null;
 let mimeType = "video/webm";
+let detectionTimer = null;
+let detectionBusy = false;
+let detectionGeneration = 0;
+let detectedFaceCount = 0;
+const detectionCanvas = document.createElement("canvas");
+const faceOverlay = $("faceOverlay");
+const faceStatus = $("faceStatus");
+
+function setFaceStatus(message, state = "") {
+  faceStatus.textContent = message;
+  faceStatus.className = "face-status" + (state ? " " + state : "");
+}
+
+function updateRecordButton() {
+  const recording = mediaRecorder && mediaRecorder.state === "recording";
+  $("btnRecord").disabled =
+    !stream || !currentChallengeId || detectedFaceCount !== 1 || recording || Boolean(recordedBlob);
+}
+
+function clearFaceOverlay() {
+  const context = faceOverlay.getContext("2d");
+  context.clearRect(0, 0, faceOverlay.width, faceOverlay.height);
+}
+
+function renderDetectedFaces(faces, width, height) {
+  faceOverlay.width = width;
+  faceOverlay.height = height;
+  const context = faceOverlay.getContext("2d");
+  context.clearRect(0, 0, width, height);
+  context.lineWidth = Math.max(2, width / 240);
+  context.font = `${Math.max(13, Math.round(width / 35))}px sans-serif`;
+
+  faces.forEach((face, index) => {
+    const box = face.bbox;
+    const x = Math.max(0, box.x1);
+    const y = Math.max(0, box.y1);
+    const w = Math.max(0, box.x2 - box.x1);
+    const h = Math.max(0, box.y2 - box.y1);
+    const color = faces.length === 1 ? "#22c55e" : "#f59e0b";
+    context.strokeStyle = color;
+    context.fillStyle = color;
+    context.strokeRect(x, y, w, h);
+    context.fillText(`Face ${index + 1} · ${Math.round(face.confidence * 100)}%`, x, Math.max(16, y - 6));
+  });
+}
+
+async function detectFacesOnce() {
+  if (detectionBusy || !stream || !$("preview").videoWidth) return;
+  const generation = detectionGeneration;
+  detectionBusy = true;
+
+  try {
+    const video = $("preview");
+    const width = Math.min(640, video.videoWidth);
+    const height = Math.round(width * video.videoHeight / video.videoWidth);
+    detectionCanvas.width = width;
+    detectionCanvas.height = height;
+    detectionCanvas.getContext("2d").drawImage(video, 0, 0, width, height);
+
+    const blob = await new Promise((resolve) => detectionCanvas.toBlob(resolve, "image/jpeg", 0.82));
+    if (!blob) throw new Error("Không thể lấy frame từ camera.");
+
+    const form = new FormData();
+    form.append("file", blob, "camera-frame.jpg");
+    const response = await fetch(`${apiBase()}/api/v1/face/detect`, {
+      method: "POST",
+      body: form,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const faces = await response.json();
+    if (generation !== detectionGeneration || !stream) return;
+
+    detectedFaceCount = faces.length;
+    renderDetectedFaces(faces, width, height);
+    if (faces.length === 1) {
+      setFaceStatus("Đã phát hiện một khuôn mặt — sẵn sàng ghi hình.", "ready");
+    } else if (faces.length > 1) {
+      setFaceStatus(`Phát hiện ${faces.length} khuôn mặt — khung hình chỉ được có một người.`, "warn");
+    } else {
+      setFaceStatus("Chưa thấy khuôn mặt — hãy nhìn thẳng và đưa mặt vào giữa camera.", "warn");
+    }
+    updateRecordButton();
+  } catch (error) {
+    if (generation === detectionGeneration) {
+      detectedFaceCount = 0;
+      clearFaceOverlay();
+      setFaceStatus("Không thể tự động phát hiện khuôn mặt: " + error.message, "error");
+      updateRecordButton();
+    }
+  } finally {
+    detectionBusy = false;
+  }
+}
+
+function startFaceDetection() {
+  if (detectionTimer || !stream) return;
+  detectionGeneration += 1;
+  detectFacesOnce();
+  detectionTimer = setInterval(detectFacesOnce, DETECT_INTERVAL_MS);
+}
+
+function stopFaceDetection(clear = true) {
+  detectionGeneration += 1;
+  if (detectionTimer) clearInterval(detectionTimer);
+  detectionTimer = null;
+  detectedFaceCount = 0;
+  if (clear) clearFaceOverlay();
+  updateRecordButton();
+}
+
 
 $("btnCamera").addEventListener("click", async () => {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    });
+    $("recordCard").style.display = "block";
+    $("preview").controls = false;
+    $("preview").removeAttribute("src");
     $("preview").srcObject = stream;
+    await $("preview").play();
     $("btnCamera").textContent = "Camera enabled";
     $("btnCamera").disabled = true;
+    setFaceStatus("Camera đã bật. Đang tìm khuôn mặt…");
+    startFaceDetection();
   } catch (err) {
-    alert("Could not access camera: " + err.message);
+    setFaceStatus("Không mở được camera: " + err.message, "error");
   }
 });
 
@@ -133,8 +275,15 @@ $("btnChallenge").addEventListener("click", async () => {
     $("recordCard").style.display = "block";
     $("btnSubmit").disabled = true;
     $("recordStatus").textContent = "";
-    $("preview").srcObject = stream;
     recordedBlob = null;
+    if (stream) {
+      $("preview").controls = false;
+      $("preview").removeAttribute("src");
+      $("preview").srcObject = stream;
+      $("preview").play();
+      startFaceDetection();
+    }
+    updateRecordButton();
   } catch (err) {
     alert("Request failed: " + err.message);
   }
@@ -149,6 +298,12 @@ $("btnRecord").addEventListener("click", () => {
     alert("Get a challenge first.");
     return;
   }
+  if (detectedFaceCount !== 1) {
+    alert("Camera phải phát hiện đúng một khuôn mặt trước khi ghi.");
+    return;
+  }
+  stopFaceDetection(false);
+  clearFaceOverlay();
   const candidates = ["video/webm;codecs=vp8", "video/webm", "video/mp4"];
   mimeType = candidates.find((c) => MediaRecorder.isTypeSupported(c)) || "";
   recordedChunks = [];
@@ -175,7 +330,7 @@ $("btnRecord").addEventListener("click", () => {
     if (remaining <= 0) {
       clearInterval(timer);
       mediaRecorder.stop();
-      $("btnRecord").disabled = false;
+      updateRecordButton();
     }
   }, 1000);
 });
@@ -209,6 +364,11 @@ $("btnSubmit").addEventListener("click", async () => {
     alert("Verification request failed: " + err.message);
     $("btnSubmit").disabled = false;
   }
+});
+
+window.addEventListener("beforeunload", () => {
+  stopFaceDetection();
+  if (stream) stream.getTracks().forEach((track) => track.stop());
 });
 </script>
 </body>
